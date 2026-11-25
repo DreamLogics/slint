@@ -1505,6 +1505,28 @@ fn build(l: &mut Loader) {
         ///
         /// This property has no effect if the `enabled` property is set to false.
         in property <bool> focus-on-tab-navigation: true;
+        /// When true, the `FocusScope` turns on the platform's input method while it has the focus,
+        /// and receives the composed text through `composition-updated` and `composition-committed`.
+        /// Use this for custom text components that lay out and draw their own text.
+        in property <bool> accepts-text-input;
+        /// The horizontal position of the text cursor, relative to the `FocusScope`.
+        /// The input method places its candidate window next to the text cursor.
+        in property <length> text-cursor-x;
+        /// The vertical position of the top of the text cursor, relative to the `FocusScope`.
+        in property <length> text-cursor-y;
+        /// The width of the text cursor.
+        in property <length> text-cursor-width;
+        /// The height of the text cursor.
+        in property <length> text-cursor-height;
+        /// The text around the cursor, without the pre-edit text.
+        /// Input methods use it for suggestions and to convert text that was already committed.
+        /// Not every platform passes it to the input method.
+        in property <string> surrounding-text;
+        /// The position of the cursor in `surrounding-text`, as a byte offset.
+        in property <int> surrounding-cursor;
+        /// The other end of the selection in `surrounding-text`, as a byte offset.
+        /// Set it to the same value as `surrounding-cursor` when there is no selection.
+        in property <int> surrounding-anchor;
         /// This function is called during key event handling, *before* `key-pressed` is called. Use this to intercept key press events. The returned <Link type="EventResult" />
         /// indicates whether to accept or reject the event. Rejected events are forwarded to the parent element.
         callback capture-key-pressed(event: KeyEvent) -> EventResult;
@@ -1523,6 +1545,13 @@ fn build(l: &mut Loader) {
         callback focus-gained(reason: FocusReason);
         /// Invoked when the `FocusScope` loses focus. The argument is a a <Link type="FocusReason" /> enum containing the reason for focus loss.
         callback focus-lost(reason: FocusReason);
+        /// Invoked when the input method changes the pre-edit text, if `accepts-text-input` is true.
+        /// Draw the pre-edit text of the <Link type="CompositionUpdateEvent" /> at the cursor, without inserting it into the text.
+        callback composition-updated(event: CompositionUpdateEvent);
+        /// Invoked when the input method commits text, if `accepts-text-input` is true.
+        /// Replace the range of `surrounding-text` that the <Link type="CompositionCommitEvent" /> names with its text.
+        /// `composition-updated` follows when the commit also ends the composition.
+        callback composition-committed(event: CompositionCommitEvent);
         //! ## Functions
         //!
         //! ### focus()

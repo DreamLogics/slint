@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 use super::{
-    EventResult, FocusReasonArg, Item, ItemConsts, ItemRc, ItemRendererRef, KeyEventArg,
-    PointerEvent, PointerEventArg, PointerEventButton, PointerEventKind, PointerScrollEvent,
-    PointerScrollEventArg, RenderingResult, VoidArg,
+    CompositionCommitEvent, CompositionCommitEventArg, CompositionUpdateEvent,
+    CompositionUpdateEventArg, EventResult, FocusReasonArg, Item, ItemConsts, ItemRc,
+    ItemRendererRef, KeyEventArg, PointerEvent, PointerEventArg, PointerEventButton,
+    PointerEventKind, PointerScrollEvent, PointerScrollEventArg, RenderingResult, VoidArg,
 };
 use crate::api::LogicalPosition;
 use crate::input::{
@@ -12,15 +13,16 @@ use crate::input::{
     InternalKeyEvent, KeyEventResult, KeyEventType, Keys, MouseEvent,
 };
 use crate::item_rendering::CachedRenderingData;
+use crate::item_tree::ItemWeak;
 use crate::items::{ItemTreeVTable, MouseCursorInner};
 use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, LogicalSize, PointLengths};
 use crate::once_box::OnceBox;
-use crate::properties::PropertyTracker;
+use crate::properties::{ChangeTracker, PropertyTracker};
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
-use crate::window::{WindowAdapter, WindowInner};
-use crate::{Callback, Coord, Property};
+use crate::window::{InputMethodProperties, InputMethodRequest, WindowAdapter, WindowInner};
+use crate::{Callback, Coord, Property, SharedString};
 use alloc::{rc::Rc, vec::Vec};
 use const_field_offset::FieldOffsets;
 use core::cell::Cell;
@@ -525,6 +527,17 @@ pub struct KeyBindingList {
     property_tracker: PropertyTracker,
 }
 
+/// The input method state of a focused `FocusScope`
+#[derive(Default)]
+pub struct FocusScopeTextInput {
+    /// Whether this `FocusScope` enabled the input method, and must disable it again.
+    enabled: Cell<bool>,
+    /// The pre-edit text and selection last passed to `composition-updated`.
+    preedit: core::cell::RefCell<(SharedString, Option<core::ops::Range<i32>>)>,
+    /// Evaluates the input method properties while the `FocusScope` has the focus.
+    tracker: ChangeTracker,
+}
+
 /// A runtime item that exposes key events
 #[repr(C)]
 #[derive(FieldOffsets, Default, SlintElement)]
@@ -534,6 +547,14 @@ pub struct FocusScope {
     pub has_focus: Property<bool>,
     pub focus_on_click: Property<bool>,
     pub focus_on_tab_navigation: Property<bool>,
+    pub accepts_text_input: Property<bool>,
+    pub text_cursor_x: Property<LogicalLength>,
+    pub text_cursor_y: Property<LogicalLength>,
+    pub text_cursor_width: Property<LogicalLength>,
+    pub text_cursor_height: Property<LogicalLength>,
+    pub surrounding_text: Property<SharedString>,
+    pub surrounding_cursor: Property<i32>,
+    pub surrounding_anchor: Property<i32>,
     pub key_pressed: Callback<KeyEventArg, EventResult>,
     pub key_released: Callback<KeyEventArg, EventResult>,
     pub capture_key_pressed: Callback<KeyEventArg, EventResult>,
@@ -541,7 +562,10 @@ pub struct FocusScope {
     pub focus_changed_event: Callback<FocusReasonArg>,
     pub focus_gained: Callback<FocusReasonArg>,
     pub focus_lost: Callback<FocusReasonArg>,
+    pub composition_updated: Callback<CompositionUpdateEventArg>,
+    pub composition_committed: Callback<CompositionCommitEventArg>,
     pub key_bindings: OnceBox<KeyBindingList>,
+    text_input: OnceBox<FocusScopeTextInput>,
     /// FIXME: remove this
     pub cached_rendering_data: CachedRenderingData,
 }
@@ -608,12 +632,170 @@ impl FocusScope {
 
         first_match.map(|binding| (VRcMapped::clone(&binding), ambiguous.is_some()))
     }
+
+    /// The input method properties, or `None` when the `FocusScope` doesn't accept text input.
+    fn ime_properties(self: Pin<&Self>, self_rc: &ItemRc) -> Option<InputMethodProperties> {
+        if !self.accepts_text_input() {
+            return None;
+        }
+        let text = self.surrounding_text();
+        let cursor_position = clamp_byte_offset(self.surrounding_cursor(), &text);
+        let anchor_position = clamp_byte_offset(self.surrounding_anchor(), &text);
+        let geometry = self_rc.geometry();
+        let origin = self_rc.map_to_native_window(geometry.origin);
+        let cursor_rect_origin = LogicalPoint::from_lengths(
+            origin.x_length() + self.text_cursor_x(),
+            origin.y_length() + self.text_cursor_y(),
+        );
+        let cursor_rect_size =
+            LogicalSize::from_lengths(self.text_cursor_width(), self.text_cursor_height());
+        let preedit_text = self.text_input.get().map(|s| s.preedit.borrow().0.clone());
+        Some(InputMethodProperties {
+            text,
+            cursor_position,
+            anchor_position: (cursor_position != anchor_position).then_some(anchor_position),
+            preedit_text: preedit_text.unwrap_or_default(),
+            preedit_offset: cursor_position,
+            cursor_rect_origin: LogicalPosition::from_euclid(cursor_rect_origin),
+            cursor_rect_size: crate::api::LogicalSize::from_euclid(cursor_rect_size),
+            anchor_point: LogicalPosition::from_euclid(cursor_rect_origin + cursor_rect_size),
+            clip_rect: Some(LogicalRect::new(origin, geometry.size)),
+            ..Default::default()
+        })
+    }
+
+    /// Enables, updates, or disables the input method after a change of `properties`.
+    fn apply_ime_properties(
+        self: Pin<&Self>,
+        properties: Option<InputMethodProperties>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+    ) {
+        let state = self.text_input.get_or_default();
+        let window_inner = WindowInner::from_pub(window_adapter.window());
+        match properties {
+            Some(properties) => {
+                let request = if state.enabled.replace(true) {
+                    InputMethodRequest::Update(properties)
+                } else {
+                    window_inner.set_text_input_focused(true);
+                    InputMethodRequest::Enable(properties)
+                };
+                if let Some(w) = window_adapter.internal(crate::InternalToken) {
+                    w.input_method_request(request);
+                }
+            }
+            None => {
+                self.disable_text_input(window_adapter);
+                self.end_composition();
+            }
+        }
+    }
+
+    fn disable_text_input(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>) {
+        let Some(state) = self.text_input.get() else { return };
+        if state.enabled.replace(false) {
+            WindowInner::from_pub(window_adapter.window()).set_text_input_focused(false);
+        }
+    }
+
+    /// Clears the pre-edit text that the input method left when it was turned off.
+    fn end_composition(self: Pin<&Self>) {
+        let Some(state) = self.text_input.get() else { return };
+        if state.preedit.take().0.is_empty() {
+            return;
+        }
+        let update =
+            CompositionUpdateEvent { selection_start: -1, selection_end: -1, ..Default::default() };
+        Self::FIELD_OFFSETS.composition_updated().apply_pin(self).call(&(update,));
+    }
+
+    /// Starts sending the input method properties to the window while the `FocusScope` has the focus.
+    fn start_text_input(
+        self: Pin<&Self>,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
+    ) {
+        let state = self.text_input.get_or_default();
+        state.tracker.init(
+            (self_rc.downgrade(), Rc::downgrade(window_adapter)),
+            |(item, _): &(ItemWeak, _)| {
+                let item = item.upgrade()?;
+                let focus_scope = item.downcast::<FocusScope>()?;
+                focus_scope.as_pin_ref().ime_properties(&item)
+            },
+            |(item, window_adapter), properties| {
+                let (Some(item), Some(window_adapter)) = (item.upgrade(), window_adapter.upgrade())
+                else {
+                    return;
+                };
+                if let Some(focus_scope) = item.downcast::<FocusScope>() {
+                    focus_scope
+                        .as_pin_ref()
+                        .apply_ime_properties(properties.clone(), &window_adapter);
+                }
+            },
+        );
+        let properties = crate::properties::evaluate_no_tracking(|| self.ime_properties(self_rc));
+        if properties.is_some() {
+            // Enable again even without a focus loss in between: a backend drops the request when
+            // its native window doesn't exist yet, as with the initial focus.
+            state.enabled.set(false);
+            self.apply_ime_properties(properties, window_adapter);
+        }
+    }
+
+    fn stop_text_input(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>) {
+        if let Some(state) = self.text_input.get() {
+            state.tracker.clear();
+        }
+        self.disable_text_input(window_adapter);
+    }
+
+    /// Passes a composition event to the `composition-committed` and `composition-updated` callbacks.
+    fn composition_event(self: Pin<&Self>, event: &InternalKeyEvent) -> EventResult {
+        let Some(state) = self.text_input.get().filter(|state| state.enabled.get()) else {
+            return EventResult::Reject;
+        };
+        let replacement = event.replacement_range.clone().filter(|range| !range.is_empty());
+        if !event.key_event.text.is_empty() || replacement.is_some() {
+            let text = self.surrounding_text();
+            let cursor = clamp_byte_offset(self.surrounding_cursor(), &text) as i32;
+            let range = replacement.unwrap_or(0..0);
+            let offset =
+                |relative: i32| clamp_byte_offset(cursor.saturating_add(relative), &text) as i32;
+            let commit = CompositionCommitEvent {
+                text: event.key_event.text.clone(),
+                replacement_start: offset(range.start),
+                replacement_end: offset(range.end),
+            };
+            Self::FIELD_OFFSETS.composition_committed().apply_pin(self).call(&(commit,));
+        }
+        let preedit = (event.preedit_text.clone(), event.preedit_selection.clone());
+        if *state.preedit.borrow() != preedit {
+            let selection = preedit.1.clone().unwrap_or(-1..-1);
+            let update = CompositionUpdateEvent {
+                text: preedit.0.clone(),
+                selection_start: selection.start,
+                selection_end: selection.end,
+            };
+            *state.preedit.borrow_mut() = preedit;
+            Self::FIELD_OFFSETS.composition_updated().apply_pin(self).call(&(update,));
+        }
+        EventResult::Accept
+    }
+}
+
+/// Clamps a byte offset into `text` and moves it to the next character boundary.
+fn clamp_byte_offset(offset: i32, text: &str) -> usize {
+    text.ceil_char_boundary(offset.max(0) as usize)
 }
 
 impl Item for FocusScope {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {}
 
-    fn deinit(self: Pin<&Self>, _window_adapter: &Rc<dyn WindowAdapter>) {}
+    fn deinit(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>) {
+        self.stop_text_input(window_adapter);
+    }
 
     fn layout_info(
         self: Pin<&Self>,
@@ -730,7 +912,7 @@ impl Item for FocusScope {
                 }
             }
             KeyEventType::UpdateComposition | KeyEventType::CommitComposition => {
-                EventResult::Reject
+                self.composition_event(event)
             }
         };
         match r {
@@ -742,8 +924,8 @@ impl Item for FocusScope {
     fn focus_event(
         self: Pin<&Self>,
         event: &FocusEvent,
-        _window_adapter: &Rc<dyn WindowAdapter>,
-        _self_rc: &ItemRc,
+        window_adapter: &Rc<dyn WindowAdapter>,
+        self_rc: &ItemRc,
     ) -> FocusEventResult {
         match event {
             FocusEvent::FocusIn(_) if !self.enabled() => return FocusEventResult::FocusIgnored,
@@ -759,11 +941,14 @@ impl Item for FocusScope {
                 };
 
                 self.has_focus.set(true);
+                self.start_text_input(window_adapter, self_rc);
                 Self::FIELD_OFFSETS.focus_changed_event().apply_pin(self).call(&(*reason,));
                 Self::FIELD_OFFSETS.focus_gained().apply_pin(self).call(&(*reason,));
             }
             FocusEvent::FocusOut(reason) => {
                 self.has_focus.set(false);
+                self.stop_text_input(window_adapter);
+                self.end_composition();
                 Self::FIELD_OFFSETS.focus_changed_event().apply_pin(self).call(&(*reason,));
                 Self::FIELD_OFFSETS.focus_lost().apply_pin(self).call(&(*reason,));
             }
