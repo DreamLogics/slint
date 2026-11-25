@@ -1508,6 +1508,7 @@ fn build(l: &mut Loader) {
         /// When true, the `FocusScope` turns on the platform's input method while it has the focus,
         /// and receives the composed text through `composition-updated` and `composition-committed`.
         /// Use this for custom text components that lay out and draw their own text.
+        /// See [Input Methods](#input-methods).
         in property <bool> accepts-text-input;
         /// The horizontal position of the text cursor, relative to the `FocusScope`.
         /// The input method places its candidate window next to the text cursor.
@@ -1608,6 +1609,61 @@ fn build(l: &mut Loader) {
         /// If no element captures the `KeyEvent`, then the `KeyEvent` is delivered to the focused element by calling `key-pressed` or `key-released`.
         /// If these callbacks return `EventResult::accept`, then event delivery is finished and the event has been handled. Otherwise, (recursively) try
         /// to deliver the key event to the parent element.
+        ///
+        /// ## Input Methods
+        ///
+        /// Input methods compose text before it's entered,
+        /// such as Chinese, Japanese, or Korean characters, accented characters through dead keys, or emoji.
+        /// `TextInput` supports them on its own.
+        /// A custom text component, such as a code editor that draws its own text, sets `accepts-text-input` on its `FocusScope`.
+        ///
+        /// While such a `FocusScope` has the focus, the input method is turned on.
+        /// The input method shows the text it composes, the pre-edit text, through `composition-updated`.
+        /// Draw it at the cursor.
+        /// When the user confirms it, `composition-committed` passes the text to insert.
+        /// Text typed without the input method still arrives through `key-pressed`.
+        ///
+        /// Set `text-cursor-x`, `text-cursor-y`, `text-cursor-width`, and `text-cursor-height` to where the cursor is drawn,
+        /// so that the input method's candidate window appears next to it.
+        /// Set `surrounding-text`, `surrounding-cursor`, and `surrounding-anchor` to the text around the cursor,
+        /// such as the current line, so that the input method can take it into account.
+        /// The `FocusScope` tells the input method when any of them change.
+        ///
+        /// ```slint
+        /// export component Editor inherits Window {
+        ///     width: 200px;
+        ///     height: 50px;
+        ///     in-out property <string> text;
+        ///     property <string> preedit;
+        ///     forward-focus: scope;
+        ///     scope := FocusScope {
+        ///         accepts-text-input: true;
+        ///         text-cursor-x: label.width;
+        ///         text-cursor-height: label.height;
+        ///         composition-updated(event) => {
+        ///             root.preedit = event.text;
+        ///         }
+        ///         composition-committed(event) => {
+        ///             root.text += event.text;
+        ///         }
+        ///         key-pressed(event) => {
+        ///             if event.text == Key.Backspace || event.modifiers.control {
+        ///                 return reject;
+        ///             }
+        ///             root.text += event.text;
+        ///             accept
+        ///         }
+        ///     }
+        ///     label := Text {
+        ///         x: 0;
+        ///         text: root.text;
+        ///     }
+        ///     Text {
+        ///         x: label.width;
+        ///         text: root.preedit;
+        ///     }
+        /// }
+        /// ```
         /// \group:keyboard-input
         @accepts_focus @expands_to_parent_geometry @constant_layout_info(1.)
         FocusScope: FocusScope {
