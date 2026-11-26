@@ -1,0 +1,241 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+export component TestCase inherits Window {
+    width: 300px;
+    height: 200px;
+
+    in-out property <bool> accepts: true;
+    in-out property <string> surrounding: "héllo";
+    in-out property <int> cursor: 3;
+    in-out property <int> anchor: 1;
+    in-out property <length> cursor-x: 7px;
+
+    out property <string> preedit: "unset";
+    out property <int> preedit-start: -2;
+    out property <int> preedit-end: -2;
+    out property <int> updates;
+    out property <string> committed;
+    out property <int> replacement-start: -2;
+    out property <int> replacement-end: -2;
+    out property <int> commits;
+    out property <int> plain-key-presses;
+    out property <string> host-text: host.text;
+
+    public function focus-editor() {
+        editor.focus();
+    }
+    public function focus-text-input() {
+        ti.focus();
+    }
+    public function focus-plain() {
+        plain.focus();
+    }
+
+    editor := FocusScope {
+        x: 10px;
+        y: 20px;
+        width: 100px;
+        height: 30px;
+        accepts-text-input: root.accepts;
+        text-cursor-x: root.cursor-x;
+        text-cursor-y: 2px;
+        text-cursor-width: 1px;
+        text-cursor-height: 16px;
+        surrounding-text: root.surrounding;
+        surrounding-cursor: root.cursor;
+        surrounding-anchor: root.anchor;
+        composition-updated(event) => {
+            root.updates += 1;
+            root.preedit = event.text;
+            root.preedit-start = event.selection-start;
+            root.preedit-end = event.selection-end;
+        }
+        composition-committed(event) => {
+            root.commits += 1;
+            root.committed = event.text;
+            root.replacement-start = event.replacement-start;
+            root.replacement-end = event.replacement-end;
+        }
+    }
+
+    ti := TextInput {
+        x: 10px;
+        y: 60px;
+        width: 100px;
+        height: 30px;
+        text: "input";
+    }
+
+    host := TextInput {
+        x: 10px;
+        y: 100px;
+        width: 100px;
+        height: 30px;
+        plain := FocusScope {
+            key-pressed(event) => {
+                root.plain-key-presses += 1;
+                accept
+            }
+        }
+    }
+}
+
+/*
+```rust
+use i_slint_core::input::{InternalKeyEvent, KeyEventType};
+use slint::private_unstable_api::re_exports::{InputMethodRequest, WindowInner};
+use slint::platform::WindowEvent;
+use slint::{LogicalPosition, LogicalSize};
+
+let instance = TestCase::new().unwrap();
+
+let take_requests = |instance: &TestCase| {
+    slint_testing::mock_elapsed_time(0);
+    slint_testing::access_testing_window(instance.window(), |w| {
+        let requests = w.ime_requests();
+        w.clear_ime_requests();
+        requests
+    })
+};
+let text_input_focused = |instance: &TestCase| WindowInner::from_pub(instance.window()).text_input_focused();
+let composition = |event_type, text: &str, preedit: &str, selection: Option<core::ops::Range<i32>>, replacement: Option<core::ops::Range<i32>>| {
+    let mut event = InternalKeyEvent::default();
+    event.event_type = event_type;
+    event.key_event.text = text.into();
+    event.preedit_text = preedit.into();
+    event.preedit_selection = selection;
+    event.replacement_range = replacement;
+    WindowEvent::internal(event)
+};
+
+assert!(take_requests(&instance).is_empty());
+
+// Focusing the FocusScope enables the input method with its properties.
+instance.invoke_focus_editor();
+let requests = take_requests(&instance);
+assert_eq!(requests.len(), 1, "{requests:?}");
+let InputMethodRequest::Enable(props) = &requests[0] else { panic!("expected Enable: {requests:?}") };
+assert_eq!(props.text, "héllo");
+assert_eq!(props.cursor_position, 3);
+assert_eq!(props.anchor_position, Some(1));
+assert_eq!(props.cursor_rect_origin, LogicalPosition::new(17., 22.));
+assert_eq!(props.cursor_rect_size, LogicalSize::new(1., 16.));
+assert!(text_input_focused(&instance));
+// The window's activation enables it again, as the initial focus can come before the native window exists.
+instance.window().dispatch_event(WindowEvent::WindowActiveChanged(true));
+let requests = take_requests(&instance);
+assert!(matches!(requests.as_slice(), [InputMethodRequest::Enable(_)]), "{requests:?}");
+
+// A change of the properties sends an update.
+instance.set_cursor(6);
+instance.set_anchor(6);
+instance.set_cursor_x(30.);
+let requests = take_requests(&instance);
+assert_eq!(requests.len(), 1, "{requests:?}");
+let InputMethodRequest::Update(props) = &requests[0] else { panic!("expected Update: {requests:?}") };
+assert_eq!(props.cursor_position, 6);
+assert_eq!(props.anchor_position, None);
+assert_eq!(props.cursor_rect_origin, LogicalPosition::new(40., 22.));
+// Nothing changed, nothing sent.
+assert!(take_requests(&instance).is_empty());
+
+// Composition, as winit sends it: pre-edit updates, an empty pre-edit, then the commit.
+instance.window().dispatch_event(composition(KeyEventType::UpdateComposition, "", "かな", Some(6..6), None));
+assert_eq!(instance.get_preedit(), "かな");
+assert_eq!((instance.get_preedit_start(), instance.get_preedit_end()), (6, 6));
+assert_eq!(instance.get_updates(), 1);
+assert_eq!(instance.get_commits(), 0);
+// Without a cursor in the pre-edit text.
+instance.window().dispatch_event(composition(KeyEventType::UpdateComposition, "", "かな", None, None));
+assert_eq!((instance.get_preedit_start(), instance.get_preedit_end()), (-1, -1));
+assert_eq!(instance.get_updates(), 2);
+instance.window().dispatch_event(composition(KeyEventType::UpdateComposition, "", "", None, None));
+assert_eq!(instance.get_preedit(), "");
+assert_eq!(instance.get_updates(), 3);
+instance.window().dispatch_event(composition(KeyEventType::CommitComposition, "仮名", "", None, None));
+assert_eq!(instance.get_committed(), "仮名");
+assert_eq!((instance.get_replacement_start(), instance.get_replacement_end()), (6, 6));
+assert_eq!(instance.get_commits(), 1);
+// The pre-edit text was already empty.
+assert_eq!(instance.get_updates(), 3);
+
+// Composition, as Qt sends it: a commit that replaces the "llo" before the cursor, and a new pre-edit text.
+instance.window().dispatch_event(composition(KeyEventType::UpdateComposition, "LLO", "x", Some(1..1), Some(-3..0)));
+assert_eq!(instance.get_committed(), "LLO");
+assert_eq!((instance.get_replacement_start(), instance.get_replacement_end()), (3, 6));
+assert_eq!(instance.get_commits(), 2);
+assert_eq!(instance.get_preedit(), "x");
+assert_eq!(instance.get_updates(), 4);
+// A replacement range is clamped to the surrounding text.
+instance.window().dispatch_event(composition(KeyEventType::CommitComposition, "all", "", None, Some(i32::MIN..i32::MAX)));
+assert_eq!((instance.get_replacement_start(), instance.get_replacement_end()), (0, 6));
+assert_eq!(instance.get_commits(), 3);
+assert_eq!(instance.get_preedit(), "");
+assert_eq!(instance.get_updates(), 5);
+// The composition events didn't reach the TextInputs.
+assert_eq!(instance.get_host_text(), "");
+assert_eq!(slint_testing::ElementHandle::find_by_element_id(&instance, "TestCase::ti").next().unwrap().accessible_value().unwrap(), "input");
+
+// Turning accepts-text-input off disables the input method, clears the pre-edit text, and composition events are rejected.
+instance.window().dispatch_event(composition(KeyEventType::UpdateComposition, "", "z", None, None));
+assert_eq!(instance.get_updates(), 6);
+instance.set_accepts(false);
+let requests = take_requests(&instance);
+assert!(matches!(requests.as_slice(), [InputMethodRequest::Disable]), "{requests:?}");
+assert!(!text_input_focused(&instance));
+assert_eq!(instance.get_preedit(), "");
+assert_eq!(instance.get_updates(), 7);
+instance.window().dispatch_event(composition(KeyEventType::CommitComposition, "ignored", "", None, None));
+assert_eq!(instance.get_commits(), 3);
+// Turning it on again enables it.
+instance.set_accepts(true);
+let requests = take_requests(&instance);
+assert!(matches!(requests.as_slice(), [InputMethodRequest::Enable(_)]), "{requests:?}");
+assert!(text_input_focused(&instance));
+
+// Moving the focus to a TextInput hands the input method over, and clears the pre-edit text.
+instance.window().dispatch_event(composition(KeyEventType::UpdateComposition, "", "z", None, None));
+assert_eq!(instance.get_preedit(), "z");
+instance.invoke_focus_text_input();
+assert_eq!(instance.get_preedit(), "");
+assert_eq!(instance.get_updates(), 9);
+let requests = take_requests(&instance);
+assert_eq!(requests.len(), 2, "{requests:?}");
+assert!(matches!(requests[0], InputMethodRequest::Disable), "{requests:?}");
+let InputMethodRequest::Enable(props) = &requests[1] else { panic!("expected Enable: {requests:?}") };
+assert_eq!(props.text, "input");
+assert!(text_input_focused(&instance));
+// The FocusScope no longer sends updates.
+instance.set_cursor(0);
+assert!(take_requests(&instance).iter().all(|r| !matches!(r, InputMethodRequest::Update(p) if p.text == "héllo")));
+instance.window().dispatch_event(composition(KeyEventType::CommitComposition, "!", "", None, None));
+assert_eq!(instance.get_commits(), 3);
+assert_eq!(slint_testing::ElementHandle::find_by_element_id(&instance, "TestCase::ti").next().unwrap().accessible_value().unwrap(), "!input");
+// The TextInput updated the input method after inserting the text.
+take_requests(&instance);
+
+// And back to the FocusScope.
+instance.invoke_focus_editor();
+let requests = take_requests(&instance);
+assert_eq!(requests.len(), 2, "{requests:?}");
+assert!(matches!(requests[0], InputMethodRequest::Disable), "{requests:?}");
+let InputMethodRequest::Enable(props) = &requests[1] else { panic!("expected Enable: {requests:?}") };
+assert_eq!(props.text, "héllo");
+assert_eq!(props.cursor_position, 0);
+assert!(text_input_focused(&instance));
+
+// A FocusScope without accepts-text-input doesn't enable the input method,
+// and rejects composition events, which go to its parent as before.
+instance.invoke_focus_plain();
+let requests = take_requests(&instance);
+assert!(matches!(requests.as_slice(), [InputMethodRequest::Disable]), "{requests:?}");
+assert!(!text_input_focused(&instance));
+instance.window().dispatch_event(composition(KeyEventType::CommitComposition, "parent", "", None, None));
+assert_eq!(instance.get_host_text(), "parent");
+assert_eq!(instance.get_commits(), 3);
+assert!(take_requests(&instance).iter().all(|r| !matches!(r, InputMethodRequest::Enable(_))));
+slint_testing::send_keyboard_string_sequence(&instance, "a");
+assert_eq!(instance.get_plain_key_presses(), 1);
+```
+*/

@@ -111,6 +111,33 @@ macro_rules! for_each_builtin_structs {
                 repeat: bool,
             }
 
+            /// This structure is passed to the `composition-updated` callback of a `FocusScope` that accepts text input.
+            /// It holds the pre-edit text: the text the input method composes and hasn't committed yet.
+            #[non_exhaustive]
+            pub struct CompositionUpdateEvent {
+                /// The pre-edit text to show at the cursor. It's empty when the composition ends or is cancelled.
+                text: SharedString,
+                /// The start of the selection within `text`, as a byte offset,
+                /// or -1 when the input method doesn't show a cursor in the pre-edit text.
+                selection_start: i32,
+                /// The end of the selection within `text`, as a byte offset, where the cursor is drawn,
+                /// or -1 when the input method doesn't show a cursor in the pre-edit text.
+                selection_end: i32,
+            }
+
+            /// This structure is passed to the `composition-committed` callback of a `FocusScope` that accepts text input.
+            /// It holds the text to insert, and the range of `surrounding-text` that it replaces.
+            #[non_exhaustive]
+            pub struct CompositionCommitEvent {
+                /// The text to insert.
+                text: SharedString,
+                /// The start of the text to replace, as a byte offset into the `surrounding-text` of the `FocusScope`.
+                replacement_start: i32,
+                /// The end of the text to replace, as a byte offset into the `surrounding-text` of the `FocusScope`.
+                /// When it's equal to `replacement-start`, `text` is inserted there and nothing is replaced.
+                replacement_end: i32,
+            }
+
             /// This structure is passed to the callbacks of the `DropArea` element
             #[non_exhaustive]
             pub struct DropEvent {
