@@ -1,0 +1,62 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+struct Item {
+    count: int?,
+}
+
+export component TestCase {
+    in property <int?> opt-int;
+    in property <string?> opt-text;
+    in property <int> plain-int;
+
+    // Widening and conversions that work
+    property <int?> widened: 42;
+    property <length?> widened-length: 10px;
+    property <float?> from-optional-int: opt-int;
+    property <string?> text-from-int: opt-int;
+    property <TextWrap?> wrap: word-wrap;
+    property <color?> color: red;
+    property <int?> conditional: plain-int > 0 ? plain-int : null;
+    property <Item> item: { count: 1 };
+    property <int> coalesced: opt-int ?? item.count ?? 0;
+    property <int?> coalesced-optional: opt-int ?? null;
+    property <bool> compared: opt-int == null || opt-int != 5 || null == opt-text;
+    property <string> unwrapped: opt-text!;
+
+    // `T?` doesn't convert to `T`
+    property <int> no-unwrap: opt-int;
+//                            >      <error{Cannot convert int? to int. Use '??' to provide a fallback value, or '!' to unwrap the value}
+    property <string> null-to-string: null;
+//                                    >   <error{Cannot convert null to string}
+    property <int> arithmetic: opt-int + 1;
+//                             >      <error{Cannot convert int? to float. Use '??' to provide a fallback value, or '!' to unwrap the value}
+    property <bool> not-optional-bool: !opt-int;
+//                                     >      <error{Cannot convert int? to bool}
+//                                     >       <^error{Cannot convert int? to bool}
+
+    // `!` and `??` need an optional value
+    property <int> unwrap-plain: plain-int!;
+//                               >        <error{'!' unwraps an optional value, but this value is 'int'. Remove the '!'}
+    property <int> coalesce-plain: plain-int ?? 0;
+//                                 >        <error{'??' needs an optional value on its left, but this value is 'int'. Remove the '??' and the fallback}
+    property <string> wrong-fallback: opt-text ?? 1px;
+//                                                > <error{Cannot convert length to string. Divide by 1px to convert to a plain number}
+
+    // Comparisons
+    property <bool> ordered: opt-int < 5;
+//                           >         <error{Values of type float? cannot be compared}
+    property <bool> null-with-null: null == null;
+//                                  >          <error{Compare 'null' with an optional value, such as an 'int?'}
+
+    // Types that aren't supported
+    property <[int]?> optional-array;
+//            >    <error{'[int]?' isn't supported. Use an empty array instead of 'null'}
+    property <int?> self-assign-plus: 1;
+
+    function f(x: int?) -> int? {
+        self-assign-plus += 1;
+//      >               <error{the += operation cannot be done on a int?}
+        return x;
+    }
+}

@@ -97,6 +97,19 @@ inline void debug(const SharedString &str)
     cbindgen_private::slint_debug(&str);
 }
 
+/// The value of `value`, or the default value of `T` with a warning in debug builds.
+template<typename T>
+T unwrap_optional(const std::optional<T> &value)
+{
+    if (value) {
+        return *value;
+    }
+#ifndef NDEBUG
+    debug(SharedString("'!' unwrapped a 'null' value, so it uses the default value instead"));
+#endif
+    return T {};
+}
+
 /// Value formatting for the testable-property debug channel
 /// (`ItemTreeVTable::element_testable_property_value`).
 /// Mirrors the Rust `i_slint_core::debug_info` encoding,

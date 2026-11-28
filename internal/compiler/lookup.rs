@@ -380,6 +380,13 @@ impl LookupObject for SpecialIdLookup {
             })
             .or_else(|| f("true", Expression::BoolLiteral(true)))
             .or_else(|| f("false", Expression::BoolLiteral(false)))
+            .or_else(|| {
+                ctx.type_register
+                    .experimental_features
+                    .contains(crate::ExperimentalFeature::OptionalTypes)
+                    .then(|| f("null", Expression::NullLiteral))
+                    .flatten()
+            })
         // "root" is just a normal id
     }
 }
@@ -728,7 +735,7 @@ impl LookupObject for TypeSpecificLookup {
         f: &mut impl FnMut(&SmolStr, LookupResult) -> Option<R>,
     ) -> Option<R> {
         let sc = ctx.diag.is_slint_sc();
-        match &ctx.expected_type {
+        match Self::expected_type(ctx) {
             Type::Color | Type::Brush if !sc => ColorSpecific.for_each_entry(ctx, f),
             Type::Easing if !sc => EasingSpecific.for_each_entry(ctx, f),
             Type::MouseCursor if !sc => MouseCursorSpecific.for_each_entry(ctx, f),
@@ -739,7 +746,7 @@ impl LookupObject for TypeSpecificLookup {
 
     fn lookup(&self, ctx: &LookupCtx, name: &SmolStr) -> Option<LookupResult> {
         let sc = ctx.diag.is_slint_sc();
-        match &ctx.expected_type {
+        match Self::expected_type(ctx) {
             Type::Color | Type::Brush if !sc => ColorSpecific.lookup(ctx, name),
             Type::Easing if !sc => EasingSpecific.lookup(ctx, name),
             Type::MouseCursor if !sc => MouseCursorSpecific.lookup(ctx, name),
@@ -750,10 +757,15 @@ impl LookupObject for TypeSpecificLookup {
 }
 
 impl TypeSpecificLookup {
+    /// The expected type, with `T` for `T?`, since a `T` value converts to `T?`.
+    fn expected_type<'b>(ctx: &'b LookupCtx) -> &'b Type {
+        ctx.expected_type.optional_inner().unwrap_or(&ctx.expected_type)
+    }
+
     /// The qualified form of `name`, such as `MouseCursor.text`, if `name` is a value of the
     /// expected type, or `None` otherwise.
     pub fn qualified_name(ctx: &LookupCtx, name: &SmolStr) -> Option<SmolStr> {
-        let namespace: &dyn std::fmt::Display = match &ctx.expected_type {
+        let namespace: &dyn std::fmt::Display = match Self::expected_type(ctx) {
             Type::Color | Type::Brush => &BuiltinNamespace::Colors,
             Type::Easing => &BuiltinNamespace::Easing,
             Type::MouseCursor => &BuiltinNamespace::MouseCursor,

@@ -93,6 +93,8 @@ pub enum Expression {
     NumberLiteral(f64),
     /// Bool
     BoolLiteral(bool),
+    /// `null`, of type [`Type::Null`]. A `Cast` of it to `T?` is the `T?` without a value.
+    NullLiteral,
 
     // Keys
     KeysLiteral(Keys),
@@ -205,6 +207,20 @@ pub enum Expression {
         sub: Box<Expression>,
         /// '+', '-', '!'
         op: char,
+    },
+
+    /// `base!`: the value of the `T?` `base`.
+    /// Without a value, it's the default value of `T`,
+    /// and debug builds and the interpreter print a warning.
+    Unwrap {
+        base: Box<Expression>,
+    },
+
+    /// `base ?? fallback`: the value of the `T?` `base`, or `fallback` if it has no value.
+    /// Only evaluates `fallback` if `base` has no value.
+    NullCoalesce {
+        base: Box<Expression>,
+        fallback: Box<Expression>,
     },
 
     ImageReference {
@@ -451,6 +467,7 @@ impl Expression {
             ConstantExpression::StringLiteral(s) => Self::StringLiteral(s.clone()),
             ConstantExpression::NumberLiteral(n, _unit) => Self::NumberLiteral(*n),
             ConstantExpression::BoolLiteral(b) => Self::BoolLiteral(*b),
+            ConstantExpression::NullLiteral => Self::NullLiteral,
             ConstantExpression::EnumerationValue(e) => Self::EnumerationValue(e.clone()),
             ConstantExpression::Cast { from, to } => {
                 Self::Cast { from: Box::new(Self::from_constant(from)), to: to.clone() }
@@ -543,6 +560,10 @@ impl Expression {
                 function: BuiltinFunction::StringToStyledText,
                 arguments: vec![Expression::StringLiteral(SmolStr::default())],
             },
+            Type::Null => Expression::NullLiteral,
+            Type::Optional(_) => {
+                Expression::Cast { from: Box::new(Expression::NullLiteral), to: ty.clone() }
+            }
         })
     }
 
@@ -551,6 +572,7 @@ impl Expression {
             Self::StringLiteral(_) => Type::String,
             Self::NumberLiteral(_) => Type::Float32,
             Self::BoolLiteral(_) => Type::Bool,
+            Self::NullLiteral => Type::Null,
             Self::PropertyReference(prop) => ctx.property_ty(prop).clone(),
             Self::FunctionParameterReference { index } => ctx.arg_type(*index).clone(),
             Self::StoreLocalVariable { .. } => Type::Void,
@@ -578,6 +600,11 @@ impl Expression {
             Self::SliceIndexAssignment { .. } => Type::Void,
             Self::BinaryExpression { lhs, rhs: _, op } => binary_expression_ty(*op, || lhs.ty(ctx)),
             Self::UnaryOp { sub, .. } => sub.ty(ctx),
+            Self::Unwrap { base } => match base.ty(ctx) {
+                Type::Optional(inner) => (*inner).clone(),
+                _ => Type::Invalid,
+            },
+            Self::NullCoalesce { fallback, .. } => fallback.ty(ctx),
             Self::ImageReference { .. } => Type::Image,
             Self::Condition { false_expr, .. } => {
                 // A condition has the type of its false branch: loop through `else if` chains.
@@ -625,6 +652,7 @@ macro_rules! visit_impl {
             Expression::StringLiteral(_) => {}
             Expression::NumberLiteral(_) => {}
             Expression::BoolLiteral(_) => {}
+            Expression::NullLiteral => {}
             Expression::PropertyReference(_) => {}
             Expression::FunctionParameterReference { .. } => {}
             Expression::StoreLocalVariable { value, .. } => $visitor(value),
@@ -658,6 +686,13 @@ macro_rules! visit_impl {
             }
             Expression::UnaryOp { sub, .. } => {
                 $visitor(sub);
+            }
+            Expression::Unwrap { base } => {
+                $visitor(base);
+            }
+            Expression::NullCoalesce { base, fallback } => {
+                $visitor(base);
+                $visitor(fallback);
             }
             Expression::ImageReference { .. } => {}
             Expression::Condition { condition, true_expr, false_expr } => {

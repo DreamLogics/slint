@@ -245,6 +245,8 @@ pub enum Expression {
     NumberLiteral(f64, Unit),
     /// Bool
     BoolLiteral(bool),
+    /// `null`, of type [`Type::Null`]. Converting it to `T?` gives the `T?` without a value.
+    NullLiteral,
 
     /// Reference to the property
     PropertyReference(NamedReference),
@@ -340,6 +342,20 @@ pub enum Expression {
         sub: Box<Expression>,
         /// '+', '-', '!'
         op: char,
+    },
+
+    /// `base!`: the value of the `T?` `base`.
+    /// Without a value, it's the default value of `T`,
+    /// and debug builds and the interpreter print a warning.
+    Unwrap {
+        base: Box<Expression>,
+    },
+
+    /// `base ?? fallback`: the value of the `T?` `base`, or `fallback` if it has no value.
+    /// `fallback` has type `T` or `T?`, which is also the type of the expression.
+    NullCoalesce {
+        base: Box<Expression>,
+        fallback: Box<Expression>,
     },
 
     ImageReference {
@@ -578,6 +594,7 @@ impl Expression {
             Expression::StringLiteral(_) => Type::String,
             Expression::NumberLiteral(_, unit) => unit.ty(),
             Expression::BoolLiteral(_) => Type::Bool,
+            Expression::NullLiteral => Type::Null,
             Expression::PropertyReference(nr) => nr.ty(),
             Expression::ElementReference(_) => Type::ElementReference,
             Expression::RepeaterIndexReference { .. } => Type::Int32,
@@ -629,6 +646,11 @@ impl Expression {
                 binary_expression_ty(*op, || lhs.ty(), || rhs.ty())
             }
             Expression::UnaryOp { sub, .. } => sub.ty(),
+            Expression::Unwrap { base } => match base.ty() {
+                Type::Optional(inner) => (*inner).clone(),
+                _ => Type::Invalid,
+            },
+            Expression::NullCoalesce { fallback, .. } => fallback.ty(),
             Expression::Array { element_ty, .. } => Type::Array(Arc::new(element_ty.clone())),
             Expression::Struct { ty, .. } => ty.clone().into(),
             Expression::PathData { .. } => Type::PathData,
@@ -673,6 +695,7 @@ impl Expression {
             Expression::StringLiteral(_) => {}
             Expression::NumberLiteral(_, _) => {}
             Expression::BoolLiteral(_) => {}
+            Expression::NullLiteral => {}
             Expression::PropertyReference { .. } => {}
             Expression::FunctionParameterReference { .. } => {}
             Expression::ElementReference(_) => {}
@@ -705,6 +728,11 @@ impl Expression {
                 visitor(rhs);
             }
             Expression::UnaryOp { sub, .. } => visitor(sub),
+            Expression::Unwrap { base } => visitor(base),
+            Expression::NullCoalesce { base, fallback } => {
+                visitor(base);
+                visitor(fallback);
+            }
             Expression::Array { values, .. } => {
                 for x in values {
                     visitor(x);
@@ -820,6 +848,7 @@ impl Expression {
             Expression::StringLiteral(_) => {}
             Expression::NumberLiteral(_, _) => {}
             Expression::BoolLiteral(_) => {}
+            Expression::NullLiteral => {}
             Expression::PropertyReference { .. } => {}
             Expression::FunctionParameterReference { .. } => {}
             Expression::ElementReference(_) => {}
@@ -852,6 +881,11 @@ impl Expression {
                 visitor(rhs);
             }
             Expression::UnaryOp { sub, .. } => visitor(sub),
+            Expression::Unwrap { base } => visitor(base),
+            Expression::NullCoalesce { base, fallback } => {
+                visitor(base);
+                visitor(fallback);
+            }
             Expression::Array { values, .. } => {
                 for x in values {
                     visitor(x);
@@ -978,6 +1012,7 @@ impl Expression {
             Expression::StringLiteral(_) => true,
             Expression::NumberLiteral(_, _) => true,
             Expression::BoolLiteral(_) => true,
+            Expression::NullLiteral => true,
             Expression::PropertyReference(nr) => nr.is_constant(),
             Expression::ElementReference(_) => false,
             Expression::RepeaterIndexReference { .. } => false,
@@ -1022,6 +1057,10 @@ impl Expression {
                 lhs.is_constant(ga) && rhs.is_constant(ga)
             }
             Expression::UnaryOp { sub, .. } => sub.is_constant(ga),
+            Expression::Unwrap { base } => base.is_constant(ga),
+            Expression::NullCoalesce { base, fallback } => {
+                base.is_constant(ga) && fallback.is_constant(ga)
+            }
             // Array will turn into model, and they can't be considered as constant if the model
             // is used and the model is changed. CF issue #5249
             //Expression::Array { values, .. } => values.iter().all(Expression::is_constant),
@@ -1107,6 +1146,51 @@ impl Expression {
             || ty == Type::Invalid
         {
             self
+        } else if let Type::Optional(inner) = &target_type
+            && (ty.can_convert(&target_type) || matches!(self, Expression::Struct { .. }))
+        {
+            match ty {
+                Type::Null => Expression::Cast { from: Box::new(self), to: target_type },
+                Type::Optional(from_inner) => {
+                    let tmp = symbol_counters.generate_name("tmpopt_conv_");
+                    let read_tmp = || Expression::ReadLocalVariable {
+                        name: tmp.clone(),
+                        ty: Type::Optional(from_inner.clone()),
+                    };
+                    let null_of = |ty: Type| Expression::Cast {
+                        from: Box::new(Expression::NullLiteral),
+                        to: ty,
+                    };
+                    let converted = Expression::Unwrap { base: Box::new(read_tmp()) }
+                        .maybe_convert_to((**inner).clone(), node, diag, symbol_counters);
+                    Expression::CodeBlock(vec![
+                        Expression::StoreLocalVariable { name: tmp.clone(), value: Box::new(self) },
+                        Expression::Condition {
+                            condition: Box::new(Expression::BinaryExpression {
+                                lhs: Box::new(read_tmp()),
+                                rhs: Box::new(null_of(Type::Optional(from_inner.clone()))),
+                                op: '=',
+                                source_location: None,
+                            }),
+                            true_expr: Box::new(null_of(target_type.clone())),
+                            false_expr: Box::new(Expression::Cast {
+                                from: Box::new(converted),
+                                to: target_type,
+                            }),
+                            source_location: None,
+                        },
+                    ])
+                }
+                _ => {
+                    let converted =
+                        self.maybe_convert_to((**inner).clone(), node, diag, symbol_counters);
+                    if converted.ty() != **inner {
+                        converted
+                    } else {
+                        Expression::Cast { from: Box::new(converted), to: target_type }
+                    }
+                }
+            }
         } else if ty.can_convert(&target_type) {
             let from = match (ty, &target_type) {
                 (Type::Brush, Type::Color) => match self {
@@ -1350,7 +1434,13 @@ impl Expression {
         } else {
             let mut message = format!("Cannot convert {ty} to {target_type}");
             // Explicit error message for unit conversion
-            if let Some(from_unit) = ty.default_unit() {
+            if let Some(inner) = ty.optional_inner()
+                && inner.can_convert(&target_type)
+            {
+                message = format!(
+                    "{message}. Use '??' to provide a fallback value, or '!' to unwrap the value"
+                );
+            } else if let Some(from_unit) = ty.default_unit() {
                 if matches!(&target_type, Type::Int32 | Type::Float32 | Type::String) {
                     message =
                         format!("{message}. Divide by 1{from_unit} to convert to a plain number");
@@ -1446,6 +1536,10 @@ impl Expression {
                 source_location: None,
             },
             Type::Closure => Expression::Invalid,
+            Type::Null => Expression::NullLiteral,
+            Type::Optional(_) => {
+                Expression::Cast { from: Box::new(Expression::NullLiteral), to: ty.clone() }
+            }
         }
     }
 
@@ -1462,6 +1556,7 @@ impl Expression {
             ConstantExpression::StringLiteral(s) => Expression::StringLiteral(s.clone()),
             ConstantExpression::NumberLiteral(n, unit) => Expression::NumberLiteral(*n, *unit),
             ConstantExpression::BoolLiteral(b) => Expression::BoolLiteral(*b),
+            ConstantExpression::NullLiteral => Expression::NullLiteral,
             ConstantExpression::EnumerationValue(e) => Expression::EnumerationValue(e.clone()),
             ConstantExpression::Cast { from, to } => {
                 Expression::Cast { from: Box::new(Self::from_constant(from)), to: to.clone() }
@@ -1582,6 +1677,7 @@ impl Expression {
                 a == b && a_unit == b_unit
             }
             (Expression::BoolLiteral(a), Expression::BoolLiteral(b)) => a == b,
+            (Expression::NullLiteral, Expression::NullLiteral) => true,
             (Expression::StringLiteral(a), Expression::StringLiteral(b)) => a == b,
             (Expression::EnumerationValue(a), Expression::EnumerationValue(b)) => a == b,
             // Colors and other converted literals arrive wrapped in a cast.
@@ -1943,6 +2039,7 @@ pub fn pretty_print(f: &mut dyn std::fmt::Write, expression: &Expression) -> std
         Expression::StringLiteral(s) => write!(f, "{s:?}"),
         Expression::NumberLiteral(vl, unit) => write!(f, "{vl}{unit}"),
         Expression::BoolLiteral(b) => write!(f, "{b:?}"),
+        Expression::NullLiteral => write!(f, "null"),
         Expression::PropertyReference(a) => write!(f, "{a:?}"),
         Expression::ElementReference(a) => write!(f, "{a:?}"),
         Expression::RepeaterIndexReference { element } => {
@@ -2011,6 +2108,17 @@ pub fn pretty_print(f: &mut dyn std::fmt::Write, expression: &Expression) -> std
         Expression::UnaryOp { sub, op } => {
             write!(f, "{op}")?;
             pretty_print(f, sub)
+        }
+        Expression::Unwrap { base } => {
+            pretty_print(f, base)?;
+            write!(f, "!")
+        }
+        Expression::NullCoalesce { base, fallback } => {
+            write!(f, "(")?;
+            pretty_print(f, base)?;
+            write!(f, " ?? ")?;
+            pretty_print(f, fallback)?;
+            write!(f, ")")
         }
         Expression::ImageReference { resource_ref, .. } => write!(f, "{resource_ref:?}"),
         Expression::Condition { condition, true_expr, false_expr, .. } => {

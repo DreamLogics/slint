@@ -3045,6 +3045,24 @@ fn component_container_requires_its_feature() {
 }
 
 #[test]
+fn optional_types_require_their_feature() {
+    let source = "export component Test { in property <int?> a; out property <int> b: c ?? 1; out property <int> d: c!; property <int> c; out property <bool> e: c == null; }";
+    let mut compiler_config =
+        CompilerConfiguration::new(crate::generator::OutputFormat::Interpreter);
+    compiler_config.experimental_features = crate::ExperimentalFeatures::default();
+    let mut diag = BuildDiagnostics::default();
+    let node = crate::parser::parse(source.into(), None, &mut diag);
+    let (_, diag, _) = spin_on::spin_on(crate::compile_syntax_node(node, diag, compiler_config));
+    let errors = diag.iter().filter(|d| d.level() == crate::diagnostics::DiagnosticLevel::Error);
+    let messages = errors.map(|d| d.message().to_string()).collect::<Vec<_>>();
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    for what in ["T?", "??", "!", "null"] {
+        let expected = format!("'{what}' is experimental. Add 'optional-types'");
+        assert!(messages.iter().any(|m| m.starts_with(&expected)), "{messages:?}");
+    }
+}
+
+#[test]
 fn test_import_widget_interfaces() {
     for enable_experimental in [false, true] {
         let mut compiler_config =

@@ -82,6 +82,11 @@ pub enum Type {
     StyledText,
     MouseCursor,
     Closure,
+
+    /// `T?`: either a value of the inner type, or no value
+    Optional(Arc<Type>),
+    /// The type of the bare `null` literal, which converts to any `T?`
+    Null,
 }
 
 impl core::cmp::PartialEq for Type {
@@ -128,6 +133,8 @@ impl core::cmp::PartialEq for Type {
             Type::StyledText => matches!(other, Type::StyledText),
             Type::DataTransfer => matches!(other, Type::DataTransfer),
             Type::Closure => matches!(other, Type::Closure),
+            Type::Optional(a) => matches!(other, Type::Optional(b) if a == b),
+            Type::Null => matches!(other, Type::Null),
         }
     }
 }
@@ -193,6 +200,8 @@ impl Display for Type {
             Type::ArrayOfU16 => write!(f, "[u16]"),
             Type::StyledText => write!(f, "styled-text"),
             Type::Closure => write!(f, "closure"),
+            Type::Optional(inner) => write!(f, "{inner}?"),
+            Type::Null => write!(f, "null"),
         }
     }
 }
@@ -224,12 +233,18 @@ impl Type {
     /// The experimental feature that must be enabled to use this type
     #[cfg(feature = "std")]
     pub fn experimental_feature(&self) -> Option<crate::ExperimentalFeature> {
-        matches!(self, Type::ComponentFactory)
-            .then_some(crate::ExperimentalFeature::ComponentContainer)
+        match self {
+            Type::ComponentFactory => Some(crate::ExperimentalFeature::ComponentContainer),
+            Type::Optional(_) | Type::Null => Some(crate::ExperimentalFeature::OptionalTypes),
+            _ => None,
+        }
     }
 
     /// valid type for properties
     pub fn is_property_type(&self) -> bool {
+        if let Self::Optional(inner) = self {
+            return inner.is_valid_optional_inner();
+        }
         matches!(
             self,
             Self::Float32
@@ -260,7 +275,26 @@ impl Type {
     }
 
     pub fn ok_for_public_api(&self) -> bool {
-        !matches!(self, Self::Easing)
+        match self {
+            Self::Easing => false,
+            Self::Optional(inner) => inner.ok_for_public_api(),
+            _ => true,
+        }
+    }
+
+    /// Whether `T?` is allowed for this `T`.
+    /// Arrays are rejected, since there's no way to create a `[T]?`.
+    pub fn is_valid_optional_inner(&self) -> bool {
+        !matches!(self, Self::Optional(_) | Self::Array(_) | Self::InferredProperty)
+            && self.is_property_type()
+    }
+
+    /// The inner type of `T?`, or `None` for any other type.
+    pub fn optional_inner(&self) -> Option<&Type> {
+        match self {
+            Self::Optional(inner) => Some(inner),
+            _ => None,
+        }
     }
 
     /// Assume it is an enumeration, panic if it isn't
@@ -293,6 +327,11 @@ impl Type {
         };
         match (self, other) {
             (a, b) if a == b => true,
+            (Type::Null, Type::Optional(_)) => true,
+            (Type::Optional(a), Type::Optional(b)) => a.can_convert(b),
+            (Type::Optional(_), Type::Void | Type::Invalid) => true,
+            (Type::Optional(_), _) => false,
+            (a, Type::Optional(b)) => a.can_convert(b),
             (_, Type::Invalid)
             | (_, Type::Void)
             | (Type::Float32, Type::Int32)
@@ -363,6 +402,8 @@ impl Type {
             Type::ArrayOfU16 => None,
             Type::StyledText => None,
             Type::Closure => None,
+            Type::Optional(_) => None,
+            Type::Null => None,
         }
     }
 
@@ -634,6 +675,7 @@ pub enum ConstantExpression {
     /// A number and its unit, in normalized form
     NumberLiteral(f64, Unit),
     BoolLiteral(bool),
+    NullLiteral,
     EnumerationValue(EnumerationValue),
     Cast {
         from: Box<ConstantExpression>,
@@ -681,7 +723,7 @@ pub(crate) fn visit_declared_types(ty: &Type, visitor: &mut impl FnMut(&SmolStr,
                 visit_declared_types(sub_ty, visitor);
             }
         }
-        Type::Array(x) => visit_declared_types(x, visitor),
+        Type::Array(x) | Type::Optional(x) => visit_declared_types(x, visitor),
         Type::Function(function) | Type::Callback(function) => {
             visit_declared_types(&function.return_type, visitor);
             for a in &function.args {

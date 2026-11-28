@@ -679,6 +679,7 @@ pub fn default_value_for_type(ty: &Type) -> Value {
         }
         Type::ComponentFactory => Value::ComponentFactory(Default::default()),
         Type::MouseCursor => Value::MouseCursorInner(Default::default()),
+        Type::Optional(_) | Type::Null => Value::Null,
         Type::Void => Value::Void,
         // Types that should never appear in this situation (e.g. are not expressible
         // by users, so cannot be returned from an unset callback or model property)
@@ -727,6 +728,7 @@ fn eval_constant_expression(expr: &ConstantExpression) -> Value {
         ConstantExpression::StringLiteral(s) => Value::String(s.as_str().into()),
         ConstantExpression::NumberLiteral(n, _unit) => Value::Number(*n),
         ConstantExpression::BoolLiteral(b) => Value::Bool(*b),
+        ConstantExpression::NullLiteral => Value::Null,
         ConstantExpression::EnumerationValue(value) => {
             Value::EnumerationValue(value.enumeration.name.to_string(), value.to_string())
         }
@@ -814,6 +816,25 @@ pub fn eval_expression(ctx: &mut EvalContext, expression: &Expression) -> Value 
         Expression::StringLiteral(s) => Value::String(s.as_str().into()),
         Expression::NumberLiteral(n) => Value::Number(*n),
         Expression::BoolLiteral(b) => Value::Bool(*b),
+        Expression::NullLiteral => Value::Null,
+        Expression::Unwrap { base } => match eval_expression(ctx, base) {
+            Value::Null | Value::Void => {
+                use i_slint_core::debug_log::*;
+                component_context(ctx).dispatch_log_message(LogMessage::new(
+                    LogMessageSource::SlintCode,
+                    None,
+                    format_args!(
+                        "'!' unwrapped a 'null' value, so it uses the default value instead"
+                    ),
+                ));
+                default_value_for_type(&expression.ty(&*ctx))
+            }
+            value => value,
+        },
+        Expression::NullCoalesce { base, fallback } => match eval_expression(ctx, base) {
+            Value::Null | Value::Void => eval_expression(ctx, fallback),
+            value => value,
+        },
         Expression::KeysLiteral(ks) => Value::Keys({
             let mut modifiers = i_slint_core::input::KeyboardModifiers::default();
             modifiers.alt = ks.modifiers.alt;

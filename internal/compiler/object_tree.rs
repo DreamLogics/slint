@@ -3153,6 +3153,34 @@ pub fn type_from_node(
         #[cfg(feature = "slint-sc")]
         diag.slint_sc_error("Array types are", &array_node);
         Type::Array(Arc::new(type_from_node(array_node.Type(), diag, tr)))
+    } else if let Some(optional_node) = node.OptionalType() {
+        if crate::reject_experimental_feature(
+            diag,
+            tr,
+            crate::ExperimentalFeature::OptionalTypes,
+            "T?",
+            &optional_node,
+        ) {
+            return Type::Invalid;
+        }
+        #[cfg(feature = "slint-sc")]
+        diag.slint_sc_error("Optional types are", &optional_node);
+        let inner = type_from_node(optional_node.Type(), diag, tr);
+        match inner {
+            Type::Invalid => Type::Invalid,
+            Type::Array(_) => {
+                diag.push_error(
+                    format!("'{inner}?' isn't supported. Use an empty array instead of 'null'"),
+                    &optional_node,
+                );
+                Type::Invalid
+            }
+            _ if !inner.is_valid_optional_inner() => {
+                diag.push_error(format!("'{inner}?' is not a valid type"), &optional_node);
+                Type::Invalid
+            }
+            _ => Type::Optional(Arc::new(inner)),
+        }
     } else {
         assert!(diag.has_errors());
         Type::Invalid
@@ -3262,6 +3290,7 @@ fn constant_from_expression(expression: &Expression) -> Option<ConstantExpressio
         Expression::StringLiteral(s) => ConstantExpression::StringLiteral(s.clone()),
         Expression::NumberLiteral(n, unit) => ConstantExpression::NumberLiteral(*n, *unit),
         Expression::BoolLiteral(b) => ConstantExpression::BoolLiteral(*b),
+        Expression::NullLiteral => ConstantExpression::NullLiteral,
         Expression::EnumerationValue(e) => ConstantExpression::EnumerationValue(e.clone()),
         Expression::Cast { from, to } => {
             // Converting a number to a string depends on the locale's decimal separator.

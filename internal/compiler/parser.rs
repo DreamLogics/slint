@@ -345,6 +345,7 @@ declare_syntax! {
         Semicolon -> ";",
         Bang -> "!",
         Dot -> ".",
+        QuestionQuestion -> "??",
         Question -> "?",
         Dollar -> "$",
         At -> "@",
@@ -417,8 +418,8 @@ declare_syntax! {
         ReturnStatement -> [ ?Expression ],
         // FIXME: the test should test that as alternative rather than several of them (but it can also be a literal)
         Expression-> [ ?Expression, ?FunctionCallExpression, ?IndexExpression, ?SelfAssignment,
-                       ?ConditionalExpression, ?QualifiedName, ?BinaryExpression, ?Array, ?ObjectLiteral,
-                       ?UnaryOpExpression, ?CodeBlock, ?StringTemplate, ?AtImageUrl, ?AtGradient, ?AtTr,
+                       ?ConditionalExpression, ?QualifiedName, ?BinaryExpression, ?NullCoalesceExpression,
+                       ?Array, ?ObjectLiteral, ?UnaryOpExpression, ?UnwrapExpression, ?CodeBlock, ?StringTemplate, ?AtImageUrl, ?AtGradient, ?AtTr,
                        ?MemberAccess, ?AtKeys, ?Closure ],
         /// Concatenate the children Expressions and StringLiteral to make a string
         StringTemplate -> [*Expression],
@@ -447,8 +448,12 @@ declare_syntax! {
         ConditionalExpression -> [3 Expression],
         /// `expr + expr`
         BinaryExpression -> [2 Expression],
+        /// `expr ?? fallback`
+        NullCoalesceExpression -> [2 Expression],
         /// `- expr`
         UnaryOpExpression -> [Expression],
+        /// `expr!`
+        UnwrapExpression -> [Expression],
         /// `(foo).bar`, where `foo` is the base expression, and `bar` is a Identifier.
         MemberAccess -> [Expression],
         /// `[ ... ]`
@@ -484,13 +489,15 @@ declare_syntax! {
         ExternalName -> [],
         InternalName -> [],
         /// The representation of a type
-        Type -> [ ?QualifiedName, ?ObjectType, ?ArrayType ],
+        Type -> [ ?QualifiedName, ?ObjectType, ?ArrayType, ?OptionalType ],
         /// `{foo: string, bar: string} `
         ObjectType ->[ *ObjectTypeMember ],
         /// `foo: type` or `foo: type = default-value` inside an ObjectType
         ObjectTypeMember -> [ Type, ?Expression ],
         /// `[ type ]`
         ArrayType -> [ Type ],
+        /// `type?`
+        OptionalType -> [ Type ],
         /// `struct Foo { ... }`
         StructDeclaration -> [DeclaredIdentifier, ObjectType, *AtRustAttr],
         /// `enum Foo { bli, bla, blu }`

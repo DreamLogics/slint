@@ -305,6 +305,14 @@ public:
         }
         return {};
     }
+    static slint::interpreter::Value null_value()
+    {
+        return slint::interpreter::Value(cbindgen_private::slint_interpreter_value_new_null());
+    }
+    static bool is_null(const slint::interpreter::Value &value)
+    {
+        return cbindgen_private::slint_interpreter_value_is_null(value.inner);
+    }
     static slint::interpreter::Value
     value_from_mouse_cursor_inner(const slint::cbindgen_private::MouseCursorInner &cursor)
     {
@@ -333,6 +341,25 @@ from_slint_value(const slint::interpreter::Value &val,
                  const slint::cbindgen_private::MouseCursorInner *)
 {
     return private_api::live_preview::LiveReloadingComponent::mouse_cursor_inner_from_value(val);
+}
+
+template<typename T>
+slint::interpreter::Value into_slint_value(const std::optional<T> &val)
+{
+    if (val) {
+        return into_slint_value(*val);
+    }
+    return private_api::live_preview::LiveReloadingComponent::null_value();
+}
+
+template<typename T>
+std::optional<T> from_slint_value(const slint::interpreter::Value &val, const std::optional<T> *)
+{
+    if (private_api::live_preview::LiveReloadingComponent::is_null(val)
+        || val.type() == slint::interpreter::Value::Type::Void) {
+        return std::nullopt;
+    }
+    return from_slint_value(val, static_cast<const T *>(nullptr));
 }
 
 template<typename T>

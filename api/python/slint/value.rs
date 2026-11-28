@@ -33,10 +33,13 @@ impl<'py> IntoPyObject<'py> for SlintToPyValue {
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         let type_collection = self.type_collection;
-        let expected_type = self.expected_type;
+        let expected_type = match self.expected_type {
+            Some(Type::Optional(inner)) => Some((*inner).clone()),
+            ty => ty,
+        };
         use slint_interpreter::Value;
         match self.slint_value {
-            Value::Void => ().into_bound_py_any(py),
+            Value::Void | Value::Null => ().into_bound_py_any(py),
             Value::Number(num) => match expected_type {
                 Some(Type::Int32) => (num as i64).into_bound_py_any(py),
                 _ => num.into_bound_py_any(py),
@@ -383,6 +386,12 @@ impl TypeCollection {
         type_collection: Option<&Self>,
         expected_type: Option<&Type>,
     ) -> PyResult<slint_interpreter::Value> {
+        if let Some(Type::Optional(inner)) = expected_type {
+            if ob.is_none() {
+                return Ok(slint_interpreter::Value::Null);
+            }
+            return Self::slint_value_from_py_value_bound(ob, type_collection, Some(inner));
+        }
         if ob.is_none() {
             return Ok(slint_interpreter::Value::Void);
         }

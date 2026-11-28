@@ -191,6 +191,10 @@ pub fn rust_primitive_type(ty: &Type) -> Option<proc_macro2::TokenStream> {
         Type::Brush => Some(quote!(slint::Brush)),
         Type::ArrayOfCoord => Some(quote!(sp::SharedVector<sp::Coord>)),
         Type::ArrayOfU16 => Some(quote!(sp::SharedVector<u16>)),
+        Type::Optional(inner) => {
+            let inner = rust_primitive_type(inner)?;
+            Some(quote!(sp::Option<#inner>))
+        }
         _ => None,
     }
 }
@@ -3740,6 +3744,9 @@ fn compile_expression_to_value(expr: &Expression, ctx: &EvaluationContext) -> To
             Expression::StringLiteral(..)
             | Expression::NumberLiteral(..)
             | Expression::BoolLiteral(..)
+            | Expression::NullLiteral
+            | Expression::Unwrap { .. }
+            | Expression::NullCoalesce { .. }
             | Expression::KeysLiteral(..)
             // compiles to a `.get()` (or `.map(...).unwrap_or_default()`) call
             | Expression::PropertyReference(..)
@@ -3844,6 +3851,30 @@ fn compile_expression(expr: &Expression, ctx: &EvaluationContext) -> TokenStream
             }
         }
         Expression::BoolLiteral(b) => quote!(#b),
+        Expression::NullLiteral => quote!(sp::None),
+        Expression::Unwrap { base } => (|| {
+            let base = compile_expression_to_value(base, ctx);
+            let context = access_context(ctx);
+            quote!(match #base {
+                sp::Some(value) => value,
+                sp::None => {
+                    if cfg!(debug_assertions) {
+                        slint::private_unstable_api::debug(&#context, sp::SharedString::from("'!' unwrapped a 'null' value, so it uses the default value instead"));
+                    }
+                    ::core::default::Default::default()
+                }
+            })
+        })(),
+        Expression::NullCoalesce { base, fallback } => (|| {
+            let some = if matches!(fallback.ty(ctx), Type::Optional(_)) {
+                quote!(sp::Some(value))
+            } else {
+                quote!(value)
+            };
+            let base = compile_expression_to_value(base, ctx);
+            let fallback = compile_expression_to_value(fallback, ctx);
+            quote!(match #base { sp::Some(value) => #some, sp::None => (#fallback) as _ })
+        })(),
         Expression::Cast { .. } => compile_cast(expr, ctx),
         Expression::PropertyReference(nr) => {
             let access = access_member(nr, ctx);
@@ -4225,6 +4256,24 @@ fn compile_cast(expr: &Expression, ctx: &EvaluationContext) -> TokenStream {
             });
             quote!(match #f { #(#cases,)*  _ => sp::SharedString::default() })
         }
+        (Type::Null, Type::Optional(inner)) => {
+            let none = match rust_primitive_type(inner) {
+                Some(inner) => quote!(sp::None::<#inner>),
+                None => quote!(sp::None),
+            };
+            if matches!(from.as_ref(), Expression::NullLiteral) {
+                none
+            } else {
+                // `null` compiles to an untyped `None`.
+                quote!({ let _: sp::Option<()> = #f; #none })
+            }
+        }
+        (from_ty, Type::Optional(inner)) if !matches!(from_ty, Type::Optional(_)) => {
+            match rust_primitive_type(inner) {
+                Some(inner) => quote!(sp::Some((#f) as #inner)),
+                None => quote!(sp::Some(#f)),
+            }
+        }
         (_, Type::Void) => {
             quote!({#f;})
         }
@@ -4375,7 +4424,16 @@ fn compile_binary_operator(
 ) -> TokenStream {
     let rhs = compile_expression_to_value_no_parenthesis(rhs, ctx);
 
-    if lhs_ty.as_unit_product().is_some() && (op == '=' || op == '!') {
+    if (op == '=' || op == '!')
+        && lhs_ty.optional_inner().is_some_and(|inner| inner.as_unit_product().is_some())
+    {
+        let maybe_negate = if op == '!' { quote!(!) } else { quote!() };
+        quote!(#maybe_negate match (#lhs, #rhs) {
+            (sp::Some(a), sp::Some(b)) => sp::ApproxEq::<f64>::approx_eq(&(a as f64), &(b as f64)),
+            (sp::None, sp::None) => true,
+            _ => false,
+        })
+    } else if lhs_ty.as_unit_product().is_some() && (op == '=' || op == '!') {
         let maybe_negate = if op == '!' { quote!(!) } else { quote!() };
         quote!(#maybe_negate sp::ApproxEq::<f64>::approx_eq(&(#lhs as f64), &(#rhs as f64)))
     } else {
@@ -4484,6 +4542,9 @@ fn compile_array(expr: &Expression, ctx: &EvaluationContext) -> TokenStream {
 /// and a literal array of it compiles to a constant blob.
 /// Types that aren't listed are cloned and chunked, which is the safe direction.
 fn is_copy(ty: &Type) -> bool {
+    if let Type::Optional(inner) = ty {
+        return is_copy(inner);
+    }
     matches!(
         ty,
         Type::Int32
