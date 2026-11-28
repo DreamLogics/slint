@@ -159,7 +159,7 @@ pub fn get_semantic_tokens(
             | SyntaxKind::Star
             | SyntaxKind::Div
             | SyntaxKind::Equal => Some((self::OPERATOR, 0)),
-            SyntaxKind::Question => Some((self::OPERATOR, 0)),
+            SyntaxKind::Question | SyntaxKind::QuestionQuestion => Some((self::OPERATOR, 0)),
             SyntaxKind::At => Some((self::MACRO, 0)),
             _ => None,
         };

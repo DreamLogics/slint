@@ -87,6 +87,9 @@
 //    ^^^ variable.other.struct.field.slint
 //         ^^^ entity.name.type.struct.field.slint
   }
+  struct Foobar { test: int?, }
+//                ^^^^ variable.other.struct.field.slint
+//                      ^^^^ entity.name.type.struct.field.slint
 
   enum Foobar { }
 //^^^^ keyword.declaration.enum.slint
@@ -160,6 +163,10 @@
 //           ^^^^^ entity.name.type.property.slint
 //                  ^^^ variable.other.property.slint
 //                          ^^^^ variable.language.special-element.slint
+   property <int?> foo;
+// ^^^^^^^^ keyword.other.property.slint
+//           ^^^^ entity.name.type.property.slint
+//                 ^^^ variable.other.property.slint
    /* test */ property <int> foo;
 // ^^^^^^^^^^ comment.block.slint
 //            ^^^^^^^^ keyword.other.property.slint

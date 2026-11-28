@@ -50,6 +50,7 @@ export const slint_language = <monaco.languages.IMonarchLanguage>{
         "let",
         "true",
         "false",
+        "null",
     ],
     type_keywords: [
         "int",

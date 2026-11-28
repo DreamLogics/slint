@@ -471,7 +471,10 @@ module.exports = grammar({
 
     type_list: ($) => seq("[", commaSep($.type), optional(","), "]"),
 
-    type: ($) => choice($._type_identifier, $.type_list, $.struct_block),
+    type: ($) =>
+      choice($._type_identifier, $.type_list, $.struct_block, $.optional_type),
+
+    optional_type: ($) => seq(field("type", $.type), "?"),
 
     let_statement: ($) =>
       seq(
@@ -512,6 +515,7 @@ module.exports = grammar({
           $.function_call,
           $.member_access,
           $.unary_expression,
+          $.unwrap_expression,
           $.binary_expression,
           $.ternary_expression,
         ),
@@ -609,6 +613,9 @@ module.exports = grammar({
         seq(field("op", $.unary_prec_operator), field("expr", $.expression)),
       ),
 
+    unwrap_expression: ($) =>
+      prec.left(17, seq(field("expr", $.expression), "!")),
+
     binary_expression: ($) =>
       prec.left(
         1,
@@ -617,6 +624,7 @@ module.exports = grammar({
           $._comparison_binary_expression,
           $._logic_binary_expression,
           $._mult_binary_expression,
+          $._null_coalesce_binary_expression,
         ),
       ),
 
@@ -646,7 +654,7 @@ module.exports = grammar({
     _logic_binary_expression: ($) =>
       choice(
         prec.left(
-          4,
+          6,
           seq(
             field("left", $.expression),
             field("op", $.logical_and),
@@ -654,12 +662,25 @@ module.exports = grammar({
           ),
         ),
         prec.left(
-          3,
+          5,
           seq(
             field("left", $.expression),
             field("op", $.logical_or),
             field("right", $.expression),
           ),
+        ),
+      ),
+
+    null_coalesce: (_) => "??",
+
+    // Binds less tightly than `||` and more tightly than `? :`.
+    _null_coalesce_binary_expression: ($) =>
+      prec.right(
+        4,
+        seq(
+          field("left", $.expression),
+          field("op", $.null_coalesce),
+          field("right", $.expression),
         ),
       ),
 
@@ -1041,6 +1062,7 @@ module.exports = grammar({
     int_value: ($) => $._int_number,
     float_value: ($) => $._float_number,
     bool_value: (_) => choice("true", "false"),
+    null_value: (_) => "null",
     string_value: ($) => $._string,
     color_value: (_) => /#[\da-fA-F]+/,
     // brush_value: ($) => ???,
@@ -1060,6 +1082,7 @@ module.exports = grammar({
         $.int_value,
         $.float_value,
         $.bool_value,
+        $.null_value,
         $.string_value,
         $.color_value,
         $.physical_length_value,

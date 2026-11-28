@@ -28,11 +28,9 @@ pub fn parse_type(p: &mut impl Parser) {
         }
     }
     if p.nth(0).kind() == SyntaxKind::Question {
-        {
-            let mut p = p.start_node_at(checkpoint.clone(), SyntaxKind::OptionalType);
-            p.consume();
-        }
-        let _ = p.start_node_at(checkpoint, SyntaxKind::Type);
+        let mut p = p.start_node_at(checkpoint.clone(), SyntaxKind::Type);
+        let mut p = p.start_node_at(checkpoint, SyntaxKind::OptionalType);
+        p.consume();
     }
 }
 

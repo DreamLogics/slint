@@ -1022,7 +1022,9 @@ fn completion_item_from_expression(
 
             let mut c = CompletionItem::new_simple(label, expression.ty().to_string());
             c.kind = match expression {
-                Expression::BoolLiteral(_) => Some(CompletionItemKind::CONSTANT),
+                Expression::BoolLiteral(_) | Expression::NullLiteral => {
+                    Some(CompletionItemKind::CONSTANT)
+                }
                 Expression::PropertyReference(_) => Some(CompletionItemKind::PROPERTY),
                 Expression::ElementReference(_) => Some(CompletionItemKind::CLASS),
                 Expression::RepeaterIndexReference { .. } => Some(CompletionItemKind::VARIABLE),
@@ -1696,6 +1698,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn in_optional_expression() {
+        for source in [
+            "component Foo { property <int?> alpha; property <int> beta: alpha ?? 🔺; }",
+            "component Foo { property <int?> alpha; property <int> beta: alpha ?? al🔺; }",
+            "component Foo { property <int?> alpha; property <int> beta: (alpha!) + 🔺; }",
+            "component Foo { property <int?> alpha; function f() -> int? { return 🔺; } }",
+        ] {
+            let res = get_completions_experimental(source).unwrap_or_default();
+            assert!(res.iter().any(|ci| ci.label == "alpha"), "{source}");
+            let null = res.iter().find(|ci| ci.label == "null");
+            assert_eq!(null.and_then(|ci| ci.kind), Some(CompletionItemKind::CONSTANT), "{source}");
+        }
+        let res = get_completions_experimental("component Foo { property <in🔺?> alpha; }")
+            .unwrap_or_default();
+        assert!(res.iter().any(|ci| ci.label == "int"));
     }
 
     #[test]

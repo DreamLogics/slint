@@ -125,8 +125,16 @@ fn format_node(
         SyntaxKind::QualifiedName => {
             return format_qualified_name(node, writer, state);
         }
-        SyntaxKind::SelfAssignment | SyntaxKind::BinaryExpression => {
+        SyntaxKind::SelfAssignment
+        | SyntaxKind::BinaryExpression
+        | SyntaxKind::NullCoalesceExpression => {
             return format_binary_expression(node, writer, state);
+        }
+        SyntaxKind::UnwrapExpression => {
+            return format_postfix(node, SyntaxKind::Expression, SyntaxKind::Bang, writer, state);
+        }
+        SyntaxKind::OptionalType => {
+            return format_postfix(node, SyntaxKind::Type, SyntaxKind::Question, writer, state);
         }
         SyntaxKind::ConditionalExpression => {
             return format_conditional_expression(node, writer, state);
@@ -868,7 +876,21 @@ fn has_newline_before(token: &i_slint_compiler::parser::SyntaxToken) -> bool {
         .is_some_and(|prev| prev.kind() == SyntaxKind::Whitespace && prev.text().contains('\n'))
 }
 
-// Called both for BinaryExpression and SelfAssignment
+/// Formats `operand` followed by the `operator` token, without whitespace in between.
+fn format_postfix(
+    node: &SyntaxNode,
+    operand: SyntaxKind,
+    operator: SyntaxKind,
+    writer: &mut impl TokenWriter,
+    state: &mut FormatState,
+) -> Result<(), std::io::Error> {
+    let mut sub = node.children_with_tokens();
+    let _ok = whitespace_to(&mut sub, operand, writer, state, "")?
+        && whitespace_to(&mut sub, operator, writer, state, "")?;
+    finish_node(sub, writer, state)?;
+    Ok(())
+}
+
 fn format_binary_expression(
     node: &SyntaxNode,
     writer: &mut impl TokenWriter,
@@ -950,6 +972,7 @@ fn format_binary_expression(
                     SyntaxKind::MinusEqual,
                     SyntaxKind::StarEqual,
                     SyntaxKind::DivEqual,
+                    SyntaxKind::QuestionQuestion,
                 ],
                 writer,
                 state,
@@ -2690,6 +2713,37 @@ component Main inherits VerticalLayout{HorizontalLayout{prop:3;}}"#,
 component Main inherits VerticalLayout {
     HorizontalLayout {
         prop: 3;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn optional_types() {
+        assert_formatting(
+            r#"
+struct Item {
+    fallback: int?=null,
+    preset: int ? = 2,
+}
+component Main {
+    property <int ?> a: b??c ?? null;
+    property <int> d: a !+e!;
+    function f(x: int?) -> string? {
+        return x?? y;
+    }
+}"#,
+            r#"
+struct Item {
+    fallback: int? = null,
+    preset: int? = 2,
+}
+component Main {
+    property <int?> a: b ?? c ?? null;
+    property <int> d: a! + e!;
+    function f(x: int?) -> string? {
+        return x ?? y;
     }
 }
 "#,
