@@ -13,6 +13,7 @@
 [
   (children_identifier)
   (easing_kind_identifier)
+  (null_value)
 ] @constant.builtin
 
 (bool_value) @boolean
@@ -49,6 +50,9 @@
   ]) @type
 
 (user_type_identifier) @type
+
+(optional_type
+  "?" @type)
 
 ; Functions and callbacks
 (argument) @variable.parameter
@@ -91,12 +95,16 @@
 (unary_expression
   op: (_) @operator)
 
+(unwrap_expression
+  "!" @operator)
+
 [
   (comparison_operator)
   (mult_prec_operator)
   (add_prec_operator)
   (unary_prec_operator)
   (assignment_prec_operator)
+  (null_coalesce)
 ] @operator
 
 [

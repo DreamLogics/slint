@@ -1,0 +1,137 @@
+================================================================================
+optional types, null, ?? and !
+================================================================================
+
+struct Item {
+    count: int? = null,
+}
+
+component Test {
+    property <[int?]> values;
+    property <int?> a: x || y ?? z ? b : c;
+    property <int?> b: p ?? q ?? r;
+    property <bool> c: !d.e! && f(1)! == 2;
+    function g(v: int?) -> string? {
+        return null;
+    }
+}
+--------------------------------------------------------------------------------
+
+(sourcefile
+  (struct_definition
+    (user_type_identifier)
+    (struct_block
+      (struct_field_definition
+        (simple_identifier)
+        (type
+          (optional_type
+            (type
+              (builtin_type_identifier))))
+        (expression
+          (value
+            (null_value))))))
+  (component_definition
+    (user_type_identifier)
+    (block
+      (property
+        (type
+          (type_list
+            (type
+              (optional_type
+                (type
+                  (builtin_type_identifier))))))
+        (simple_identifier))
+      (property
+        (type
+          (optional_type
+            (type
+              (builtin_type_identifier))))
+        (simple_identifier)
+        (expression
+          (ternary_expression
+            (expression
+              (binary_expression
+                (expression
+                  (binary_expression
+                    (expression
+                      (simple_identifier))
+                    (logical_or)
+                    (expression
+                      (simple_identifier))))
+                (null_coalesce)
+                (expression
+                  (simple_identifier))))
+            (expression
+              (simple_identifier))
+            (expression
+              (simple_identifier)))))
+      (property
+        (type
+          (optional_type
+            (type
+              (builtin_type_identifier))))
+        (simple_identifier)
+        (expression
+          (binary_expression
+            (expression
+              (simple_identifier))
+            (null_coalesce)
+            (expression
+              (binary_expression
+                (expression
+                  (simple_identifier))
+                (null_coalesce)
+                (expression
+                  (simple_identifier)))))))
+      (property
+        (type
+          (builtin_type_identifier))
+        (simple_identifier)
+        (expression
+          (binary_expression
+            (expression
+              (unary_expression
+                (unary_prec_operator)
+                (expression
+                  (unwrap_expression
+                    (expression
+                      (member_access
+                        (expression
+                          (simple_identifier))
+                        (expression
+                          (simple_identifier))))))))
+            (logical_and)
+            (expression
+              (binary_expression
+                (expression
+                  (unwrap_expression
+                    (expression
+                      (function_call
+                        (simple_identifier)
+                        (arguments
+                          (argument
+                            (expression
+                              (value
+                                (int_value)))))))))
+                (comparison_operator)
+                (expression
+                  (value
+                    (int_value))))))))
+      (function_definition
+        (simple_identifier)
+        (typed_identifier
+          (simple_identifier)
+          (type
+            (optional_type
+              (type
+                (builtin_type_identifier)))))
+        (type
+          (optional_type
+            (type
+              (builtin_type_identifier))))
+        (imperative_block
+          (imperative_statement
+            (return_statement
+              (expression
+                (value
+                  (null_value))))))))))
