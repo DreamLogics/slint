@@ -529,6 +529,7 @@ impl<'a, T> Display for DisplayExpression<'a, T> {
             Expression::StringLiteral(x) => write!(f, "{x:?}"),
             Expression::NumberLiteral(x) => write!(f, "{x:?}"),
             Expression::BoolLiteral(x) => write!(f, "{x:?}"),
+            Expression::NullLiteral => write!(f, "null"),
             Expression::KeysLiteral(keys) => {
                 write!(f, "@keys({keys})",)
             }
@@ -582,6 +583,10 @@ impl<'a, T> Display for DisplayExpression<'a, T> {
                 write!(f, "({} {} {})", e(lhs), op, e(rhs))
             }
             Expression::UnaryOp { sub, op } => write!(f, "{}{}", op, e(sub)),
+            Expression::Unwrap { base } => write!(f, "{}!", e(base)),
+            Expression::NullCoalesce { base, fallback } => {
+                write!(f, "({} ?? {})", e(base), e(fallback))
+            }
             Expression::ImageReference { resource_ref, nine_slice } => {
                 write!(f, "{resource_ref:?}")?;
                 if let Some(nine_slice) = &nine_slice {

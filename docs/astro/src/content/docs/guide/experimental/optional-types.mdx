@@ -1,0 +1,109 @@
+---
+title: Optional Types
+description: Experimental optional types, the null literal, and the ?? and ! operators.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Use an optional type when a property, struct field, or argument may have no value.
+That way you don't need a placeholder such as `-1` or an empty string to mean "nothing".
+
+> **Note**: Optional types are experimental and subject to change.
+> Enable them with the `optional-types` [experimental feature](../overview/).
+
+## Declaring an Optional Type
+
+Add `?` after a type to make it optional: `int?` holds either an `int` or no value.
+Use `T?` for properties, struct fields, function parameters, and return types.
+
+```slint
+export struct Contact {
+    name: string,
+    phone: string?,
+}
+
+export component Example {
+    in property <int?> selected-row;
+    in property <Contact> contact;
+
+    function find(name: string) -> int? {
+        if name == "" {
+            return null;
+        }
+        return 0;
+    }
+}
+```
+
+The `null` literal is the value of a `T?` without a value.
+A `T?` property without a binding starts as `null`, and so does a `T?` struct field without a default value.
+
+A `T` value converts to `T?`, so `property <int?> count: 5;` works as is.
+A `T?` doesn't convert to `T`: use `??` or `!` to get a `T` out of it.
+
+Optional arrays such as `[int]?` aren't supported.
+Use an empty array instead.
+An array of optional values, such as `[int?]`, works.
+
+## Reading an Optional Value
+
+`a ?? b` reads the value of `a`, or `b` if `a` is `null`.
+`b` is only evaluated when `a` is `null`.
+If `b` is a `T`, the result is a `T`, and if `b` is a `T?`, the result is a `T?`.
+Chain `??` to try several values in turn:
+
+```slint
+export component Example {
+    in property <string?> nickname;
+    in property <string?> first-name;
+
+    out property <string> greeting: "Hello, " + (nickname ?? first-name ?? "stranger");
+}
+```
+
+`??` binds less tightly than `||` and more tightly than `? :`.
+
+`a!` reads the value of `a` when you know that it's not `null`.
+If `a` is `null`, `a!` reads the default value of the type, such as `0` or `""`.
+Debug builds and the interpreter also print a warning, so that you can find the mistake.
+
+## Comparing With `null`
+
+Use `==` and `!=` to check for a value:
+
+```slint
+export component Example {
+    in property <int?> selected-row;
+
+    out property <bool> has-selection: selected-row != null;
+    out property <bool> first-row-selected: selected-row == 0;
+}
+```
+
+Comparing a `T?` with a `T` compares the values, and `null` is never equal to a `T`.
+Ordering comparisons, such as `<`, need a `T`: use `??` or `!` first.
+
+`debug()` prints `null` for an optional without a value.
+
+## Optional Types in Native Code
+
+<Tabs syncKey="dev-language">
+  <TabItem label="Rust" icon="seti:rust">
+  A `T?` is an `Option<T>`.
+  </TabItem>
+  <TabItem label="C++" icon="seti:cpp">
+  A `T?` is a `std::optional<T>`.
+  </TabItem>
+  <TabItem label="NodeJS" icon="node">
+  A `T?` is the JavaScript value, or `null`.
+  Setting `undefined` also sets `null`.
+  </TabItem>
+  <TabItem label="Python" icon="seti:python">
+  A `T?` is the Python value, or `None`.
+  </TabItem>
+</Tabs>
+
+## Current Limitations
+
+You can't animate an optional property.
+An `if` condition doesn't narrow a `T?` to a `T`, so use `!` inside the branch.

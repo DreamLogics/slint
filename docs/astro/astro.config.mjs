@@ -310,6 +310,10 @@ export default defineSlintDocsConfig({
                                                   slug: "guide/experimental/array-predicates",
                                               },
                                               {
+                                                  label: "Optional Types",
+                                                  slug: "guide/experimental/optional-types",
+                                              },
+                                              {
                                                   label: "Named Slots",
                                                   slug: "guide/experimental/named-slots",
                                               },

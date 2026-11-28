@@ -434,6 +434,7 @@ impl From<i_slint_compiler::langtype::Type> for PyValueType {
             Type::Enumeration(..) => PyValueType::Enumeration,
             Type::Keys => PyValueType::Keys,
             Type::MouseCursor => PyValueType::MouseCursor,
+            Type::Optional(inner) => (*inner).clone().into(),
             _ => unimplemented!(),
         }
     }

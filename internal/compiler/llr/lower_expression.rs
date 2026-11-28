@@ -92,6 +92,14 @@ pub fn lower_expression(
         tree_Expression::StringLiteral(s) => llr_Expression::StringLiteral(s.clone()),
         tree_Expression::NumberLiteral(n, _unit) => llr_Expression::NumberLiteral(*n),
         tree_Expression::BoolLiteral(b) => llr_Expression::BoolLiteral(*b),
+        tree_Expression::NullLiteral => llr_Expression::NullLiteral,
+        tree_Expression::Unwrap { base } => {
+            llr_Expression::Unwrap { base: Box::new(lower_expression(base, ctx)) }
+        }
+        tree_Expression::NullCoalesce { base, fallback } => llr_Expression::NullCoalesce {
+            base: Box::new(lower_expression(base, ctx)),
+            fallback: Box::new(lower_expression(fallback, ctx)),
+        },
         tree_Expression::PropertyReference(nr) => {
             llr_Expression::PropertyReference(ctx.map_property_reference(nr))
         }

@@ -95,7 +95,7 @@ pub struct JsProperty {
 
 pub fn to_js_unknown<'a>(env: &'a Env, value: &Value) -> Result<Unknown<'a>> {
     match value {
-        Value::Void => Null.into_unknown(env),
+        Value::Void | Value::Null => Null.into_unknown(env),
         Value::Number(number) => (*number).into_unknown(env),
         Value::String(string) => string.as_str().into_unknown(env),
         Value::Bool(value) => (*value).into_unknown(env),
@@ -139,6 +139,8 @@ pub fn to_js_unknown_of_type<'a>(
         (Value::Model(model), Type::Array(row_type)) => {
             model_to_js(env, model, Some(((**row_type).clone(), owner.clone())))
         }
+        (Value::Null, Type::Optional(_)) => Null.into_unknown(env),
+        (value, Type::Optional(inner)) => to_js_unknown_of_type(env, value, inner, owner),
         (Value::Struct(struct_value), Type::Struct(s)) => {
             struct_to_js(env, struct_value, |name, value| match s.fields.get(name) {
                 Some(ty) => to_js_unknown_of_type(env, value, ty, owner),
@@ -230,6 +232,13 @@ pub fn to_value(
     anchor_owner: &JsAnchorOwner,
 ) -> Result<Value> {
     match typ {
+        Type::Optional(inner) => {
+            if matches!(unknown.get_type()?, napi::ValueType::Undefined | napi::ValueType::Null) {
+                Ok(Value::Null)
+            } else {
+                to_value(env, unknown, inner, anchor_owner)
+            }
+        }
         Type::Float32
         | Type::Int32
         | Type::Duration
@@ -380,6 +389,7 @@ pub fn to_value(
         | Type::ArrayOfU16
         | Type::ElementReference
         | Type::MouseCursor
+        | Type::Null
         | Type::Closure => Err(napi::Error::from_reason("reason")),
         Type::StyledText => {
             let obj = unknown.coerce_to_object()?;

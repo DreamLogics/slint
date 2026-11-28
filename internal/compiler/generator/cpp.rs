@@ -576,6 +576,7 @@ impl CppType for Type {
             Type::Easing => Some("::slint::cbindgen_private::EasingCurve".into()),
             Type::StyledText => Some("::slint::StyledText".into()),
             Type::MouseCursor => Some("::slint::cbindgen_private::MouseCursorInner".into()),
+            Type::Optional(inner) => Some(format_smolstr!("std::optional<{}>", inner.cpp_type()?)),
             _ => None,
         }
     }
@@ -1062,6 +1063,7 @@ pub fn generate_types(used_types: &[Type], config: &Config, unit: &llr::Compilat
 
     file.includes.push("<array>".into());
     file.includes.push("<limits>".into());
+    file.includes.push("<optional>".into());
     file.includes.push("<slint.h>".into());
 
     file.after_includes = format!(
@@ -4466,6 +4468,20 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
             }
         })(),
         Expression::BoolLiteral(b) => b.to_string(),
+        Expression::NullLiteral => "std::nullopt".into(),
+        Expression::Unwrap { base } => {
+            format!("::slint::private_api::unwrap_optional({})", compile_expression(base, ctx))
+        }
+        Expression::NullCoalesce { base, fallback } => (|| {
+            let fallback_ty = fallback.ty(ctx);
+            let value = if matches!(fallback_ty, Type::Optional(_)) { "value" } else { "*value" };
+            format!(
+                "[&]() -> {ty} {{ if (auto value = {base}) {{ return {value}; }} return {fallback}; }}()",
+                ty = fallback_ty.cpp_type().unwrap(),
+                base = compile_expression(base, ctx),
+                fallback = compile_expression(fallback, ctx),
+            )
+        })(),
         Expression::KeysLiteral(ks) => (|| {
             format!(
                 "[&](const ::slint::SharedString &key, bool alt, bool control, bool shift, bool meta, bool ignoreShift, bool ignoreAlt) {{
@@ -4679,6 +4695,17 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
                         cases.join(" ")
                     )
                 }
+                (Type::Null, Type::Optional(_)) => {
+                    let ty = to.cpp_type().unwrap();
+                    if matches!(from.as_ref(), Expression::NullLiteral) {
+                        format!("{ty}()")
+                    } else {
+                        format!("[&]() -> {ty} {{ {f}; return {{}}; }}()")
+                    }
+                }
+                (from, Type::Optional(_)) if !matches!(from, Type::Optional(_)) => {
+                    format!("{}({f})", to.cpp_type().unwrap())
+                }
                 _ => f,
             }
         })(),
@@ -4748,7 +4775,14 @@ fn compile_expression(expr: &llr::Expression, ctx: &EvaluationContext) -> String
 
             let lhs_ty = lhs.ty(ctx);
 
-            if lhs_ty.as_unit_product().is_some() && (*op == '=' || *op == '!') {
+            if (*op == '=' || *op == '!')
+                && lhs_ty.optional_inner().is_some_and(|inner| inner.as_unit_product().is_some())
+            {
+                let not = if *op == '=' { "" } else { "!" };
+                format!(
+                    "{not}[](const auto &a, const auto &b) {{ return a.has_value() == b.has_value() && (!a || std::abs(float(*a - *b)) < std::numeric_limits<float>::epsilon()); }}({lhs_str}, {rhs_str})"
+                )
+            } else if lhs_ty.as_unit_product().is_some() && (*op == '=' || *op == '!') {
                 let op = if *op == '=' { "<" } else { ">=" };
                 format!(
                     "(std::abs(float({lhs_str} - {rhs_str})) {op} std::numeric_limits<float>::epsilon())"

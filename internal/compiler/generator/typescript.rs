@@ -414,6 +414,7 @@ fn ts_read_type_name(ty: &Type) -> Option<SmolStr> {
     match ty {
         Type::Color | Type::Brush => Some(SmolStr::new_static("Required<slint.Brush>")),
         Type::Array(_) => Some(ts_type_name(ty)),
+        Type::Optional(inner) => ts_read_type_name(inner).map(|t| format_smolstr!("{t} | null")),
         _ => None,
     }
 }
@@ -429,6 +430,7 @@ fn ts_input_type_name(ty: &Type) -> SmolStr {
                 format_smolstr!("slint.Model<{elem}> | {elem}[]")
             }
         }
+        Type::Optional(inner) => format_smolstr!("{} | null", ts_input_type_name(inner)),
         ty => ts_type_name(ty),
     }
 }
@@ -471,6 +473,7 @@ fn ts_type_name(ty: &Type) -> SmolStr {
         Type::Brush => SmolStr::new_static("slint.Brush | string"),
         Type::StyledText => SmolStr::new_static("slint.StyledText"),
         Type::Array(elem_type) => format_smolstr!("slint.Model<{}>", ts_type_name(elem_type)),
+        Type::Optional(inner) => format_smolstr!("{} | null", ts_type_name(inner)),
         Type::Struct(s) => match &s.name {
             StructName::User { name, .. } => ident(name),
             // `is_public` also covers two structs that are not in `for_each_builtin_structs`,

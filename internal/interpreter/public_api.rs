@@ -89,6 +89,15 @@ pub(crate) fn check_and_coerce(value: &mut Value, ty: &Type) -> bool {
         Type::DataTransfer => matches!(value, Value::DataTransfer(_)),
         Type::Easing => matches!(value, Value::EasingCurve(_)),
         Type::MouseCursor => matches!(value, Value::MouseCursorInner(_)),
+        Type::Null => matches!(value, Value::Null),
+        Type::Optional(inner) => match value {
+            Value::Null => true,
+            Value::Void => {
+                *value = Value::Null;
+                true
+            }
+            value => check_and_coerce(value, inner),
+        },
         Type::Array(inner) => match value {
             Value::Model(m) => {
                 let mut ok = true;

@@ -1,0 +1,172 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+export struct Item {
+    name: string,
+    count: int?,
+    label: string?,
+    fallback: int? = null,
+    preset: int? = 2,
+}
+
+component Child {
+    in-out property <string?> value;
+}
+
+export component TestCase inherits Rectangle {
+    in-out property <int?> maybe-int;
+    in-out property <int?> some-int: 42;
+    in-out property <string?> maybe-text;
+    in-out property <length?> maybe-length: 10px;
+    in-out property <TextWrap?> wrap: word-wrap;
+    in-out property <color?> maybe-color: red;
+    in-out property <Item> item: { name: "a", count: 3 };
+    in-out property <float?> float-from-int: some-int;
+    property <int?> also-null: null;
+    property <int?> conditional: maybe-int == null ? 5 : null;
+    property <float?> float-sum: 0.1 + 0.2;
+    in-out property <[int?]> values: [1, null, 3];
+
+    child := Child {
+        value <=> root.maybe-text;
+    }
+
+    init => {
+        debug("optional values:", maybe-int, some-int, maybe-text);
+    }
+
+    function pick(value: int?, fallback: int) -> int {
+        return value ?? fallback;
+    }
+    function maybe(flag: bool) -> string? {
+        if flag {
+            return "yes";
+        }
+        return null;
+    }
+
+    out property <bool> test-default: maybe-int == null && maybe-text == null && null == maybe-int;
+    out property <bool> test-widening: some-int == 42 && some-int != null && maybe-length == 10px && maybe-color == Colors.red;
+    out property <bool> test-coalesce: (maybe-int ?? 7) == 7 && (some-int ?? 7) == 42
+        && (maybe-int ?? also-null ?? 3) == 3 && (maybe-int ?? some-int) == 42 && (maybe-int ?? null) == null;
+    out property <bool> test-unwrap: some-int! == 42 && maybe-text! == "" && item.count! + 1 == 4;
+    out property <bool> test-enum: wrap == TextWrap.word-wrap && wrap != no-wrap;
+    out property <bool> test-struct: item.count == 3 && item.label == null && item.name == "a"
+        && item.fallback == null && item.preset == 2;
+    out property <bool> test-array: values[0] == 1 && values[1] == null && values[7] == null;
+    out property <bool> test-two-way: child.value == maybe-text;
+    out property <bool> test-function: pick(null, 5) == 5 && pick(2, 5) == 2 && maybe(true)! == "yes" && maybe(false) == null;
+    out property <bool> test-conversion: float-from-int == 42.0 && conditional == 5
+        && float-sum == 0.3 && some-int != 42.5 && (maybe-int == null ? some-int : 2.5) == 42;
+    out property <bool> test: test-default && test-widening && test-coalesce && test-unwrap && test-enum
+        && test-struct && test-function && test-conversion && test-array && test-two-way;
+}
+
+/*
+```rust
+let instance = TestCase::new().unwrap();
+assert!(instance.get_test_default());
+assert!(instance.get_test_widening());
+assert!(instance.get_test_coalesce());
+assert!(instance.get_test_unwrap());
+assert!(instance.get_test_enum());
+assert!(instance.get_test_struct());
+assert!(instance.get_test_function());
+assert!(instance.get_test_conversion());
+assert!(instance.get_test_array());
+assert!(instance.get_test_two_way());
+assert!(instance.get_test());
+
+assert_eq!(instance.get_maybe_int(), None);
+assert_eq!(instance.get_some_int(), Some(42));
+assert_eq!(instance.get_maybe_text(), None);
+assert_eq!(instance.get_wrap(), Some(slint::private_unstable_api::re_exports::TextWrap::WordWrap));
+let item = instance.get_item();
+assert_eq!(item.count, Some(3));
+assert_eq!(item.label, None);
+
+instance.set_maybe_int(Some(9));
+assert!(!instance.get_test_default());
+assert!(!instance.get_test_conversion());
+instance.set_maybe_int(None);
+assert!(instance.get_test_default());
+instance.set_maybe_text(Some("hello".into()));
+assert_eq!(instance.get_maybe_text(), Some("hello".into()));
+instance.set_item(Item { name: "b".into(), label: Some("c".into()), ..Default::default() });
+assert!(!instance.get_test_struct());
+assert_eq!(instance.get_item().label, Some("c".into()));
+```
+
+```cpp
+auto handle = TestCase::create();
+const TestCase &instance = *handle;
+assert(instance.get_test_default());
+assert(instance.get_test_widening());
+assert(instance.get_test_coalesce());
+assert(instance.get_test_unwrap());
+assert(instance.get_test_enum());
+assert(instance.get_test_struct());
+assert(instance.get_test_function());
+assert(instance.get_test_conversion());
+assert(instance.get_test_array());
+assert(instance.get_test_two_way());
+assert(instance.get_test());
+
+assert(!instance.get_maybe_int().has_value());
+assert(instance.get_some_int() == std::optional<int>(42));
+assert(!instance.get_maybe_text().has_value());
+auto item = instance.get_item();
+assert(item.count == std::optional<int>(3));
+assert(!item.label.has_value());
+
+instance.set_maybe_int(9);
+assert(!instance.get_test_default());
+assert(!instance.get_test_conversion());
+instance.set_maybe_int(std::nullopt);
+assert(instance.get_test_default());
+instance.set_maybe_text(slint::SharedString("hello"));
+assert(instance.get_maybe_text() == std::optional<slint::SharedString>("hello"));
+instance.set_item(Item { .name = "b", .count = std::nullopt, .label = slint::SharedString("c") });
+assert(!instance.get_test_struct());
+assert(instance.get_item().label == std::optional<slint::SharedString>("c"));
+```
+
+```js
+var instance = new slint.TestCase({});
+assert(instance.test);
+assert.equal(instance.maybe_int, null);
+assert.equal(instance.some_int, 42);
+assert.equal(instance.maybe_text, null);
+assert.deepEqual(instance.item, { name: "a", count: 3, label: null, fallback: null, preset: 2 });
+
+instance.maybe_int = 9;
+assert(!instance.test_default);
+instance.maybe_int = null;
+assert(instance.test_default);
+instance.maybe_text = "hello";
+assert.equal(instance.maybe_text, "hello");
+instance.item = { name: "b", count: null, label: "c" };
+assert(!instance.test_struct);
+assert.equal(instance.item.label, "c");
+```
+
+```python
+instance = TestCase()
+assert instance.test
+assert instance.maybe_int is None
+assert instance.some_int == 42
+assert instance.maybe_text is None
+assert instance.item.count == 3
+assert instance.item.label is None
+
+instance.maybe_int = 9
+assert not instance.test_default
+instance.maybe_int = None
+assert instance.test_default
+instance.maybe_text = "hello"
+assert instance.maybe_text == "hello"
+instance.item = Item(name="b", count=None, label="c")
+assert not instance.test_struct
+assert instance.item.label == "c"
+```
+*/

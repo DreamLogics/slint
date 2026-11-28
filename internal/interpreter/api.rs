@@ -151,6 +151,10 @@ pub enum Value {
     #[doc(hidden)]
     /// A mouse cursor.
     MouseCursorInner(i_slint_core::cursor::MouseCursorInner) = 17,
+    /// Correspond to `null`, a `T?` in .slint without a value.
+    /// Optional types are experimental: enable them with `optional-types`
+    /// in `SLINT_ENABLE_EXPERIMENTAL_FEATURES`.
+    Null = 18,
 }
 
 impl Value {
@@ -211,6 +215,7 @@ impl PartialEq for Value {
             Value::MouseCursorInner(lhs) => {
                 matches!(other, Value::MouseCursorInner(rhs) if lhs == rhs)
             }
+            Value::Null => matches!(other, Value::Null),
         }
     }
 }
@@ -242,6 +247,7 @@ impl core::fmt::Debug for Value {
             Value::Keys(ks) => write!(f, "Value::Keys({ks:?})"),
             Value::DataTransfer(cd) => write!(f, "Value::DataTransfer({cd:?})"),
             Value::MouseCursorInner(m) => write!(f, "Value::MouseCursor({m:?})"),
+            Value::Null => write!(f, "Value::Null"),
         }
     }
 }

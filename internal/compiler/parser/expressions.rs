@@ -31,6 +31,9 @@ use super::prelude::*;
 /// {object:42}
 /// "foo".bar.something().something.xx({a: 1.foo}.a)
 /// (x) => x > 0
+/// a ?? b ?? c
+/// a || b ?? c ? d : e
+/// a! + b.c!.d
 /// ```
 pub fn parse_expression(p: &mut impl Parser) -> bool {
     p.peek(); // consume the whitespace so they aren't part of the Expression node
@@ -42,6 +45,8 @@ pub fn parse_expression(p: &mut impl Parser) -> bool {
 enum OperatorPrecedence {
     /// ` ?: `
     Default,
+    /// `??`
+    NullCoalesce,
     /// `||`, `&&`
     Logical,
     /// `==` `!=` `>=` `<=` `<` `>`
@@ -140,6 +145,13 @@ fn parse_expression_helper(p: &mut impl Parser, precedence: OperatorPrecedence) 
                 parse_expression(&mut *p);
                 p.expect(SyntaxKind::RBracket);
             }
+            SyntaxKind::Bang => {
+                {
+                    let _ = p.start_node_at(checkpoint.clone(), SyntaxKind::Expression);
+                }
+                let mut p = p.start_node_at(checkpoint.clone(), SyntaxKind::UnwrapExpression);
+                p.consume(); // '!'
+            }
             _ => break,
         }
         possible_range = false;
@@ -223,6 +235,23 @@ fn parse_expression_helper(p: &mut impl Parser, precedence: OperatorPrecedence) 
         let mut p = p.start_node_at(checkpoint.clone(), SyntaxKind::BinaryExpression);
         p.consume();
         parse_expression_helper(&mut *p, OperatorPrecedence::Logical);
+    }
+
+    if precedence > OperatorPrecedence::NullCoalesce {
+        return true;
+    }
+
+    if p.nth(0).kind() == SyntaxKind::QuestionQuestion {
+        {
+            let _ = p.start_node_at(checkpoint.clone(), SyntaxKind::Expression);
+        }
+        let mut p = p.start_node_at(checkpoint.clone(), SyntaxKind::NullCoalesceExpression);
+        p.consume();
+        parse_expression_helper(&mut *p, OperatorPrecedence::NullCoalesce);
+    }
+
+    if precedence >= OperatorPrecedence::NullCoalesce {
+        return true;
     }
 
     if p.nth(0).kind() == SyntaxKind::Question {

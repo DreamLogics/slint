@@ -181,7 +181,7 @@ fn rename_type(ty: &mut Type, renames: &Renames) {
     match ty {
         Type::Enumeration(en) => rename_type_enum(en, renames),
         Type::Struct(s) => rename_struct(s, renames),
-        Type::Array(inner) => {
+        Type::Array(inner) | Type::Optional(inner) => {
             let mut new_inner = (**inner).clone();
             rename_type(&mut new_inner, renames);
             if new_inner != **inner {

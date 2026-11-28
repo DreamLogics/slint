@@ -211,6 +211,17 @@ pub extern "C" fn slint_interpreter_value_to_data_transfer(
     }
 }
 
+/// Construct a new Value containing `null`
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_new_null() -> Box<Value> {
+    Box::new(Value::Null)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn slint_interpreter_value_is_null(val: &Value) -> bool {
+    matches!(val, Value::Null)
+}
+
 /// Construct a new Value containing a Keys
 #[unsafe(no_mangle)]
 pub extern "C" fn slint_interpreter_value_new_keys(keys: &i_slint_core::input::Keys) -> Box<Value> {

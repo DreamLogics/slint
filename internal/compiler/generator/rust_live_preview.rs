@@ -108,11 +108,16 @@ fn generate_public_component(
             let return_type = rust_primitive_type(&callback.return_type).unwrap();
             let args_name =
                 (0..callback.args.len()).map(|i| format_ident!("arg_{}", i)).collect::<Vec<_>>();
+            let args_to_value = callback.args.iter().map(convert_to_value_fn).collect::<Vec<_>>();
+            let args_from_value =
+                callback.args.iter().map(convert_from_value_fn).collect::<Vec<_>>();
+            let return_to_value = convert_to_value_fn(&callback.return_type);
+            let return_from_value = convert_from_value_fn(&callback.return_type);
             let caller_ident = accessor_names::rust_accessor_ident(name, AccessorKind::Invoker);
             property_and_callback_accessors.push(quote!(
                 pub fn #caller_ident(&self, #(#args_name : #callback_args,)*) -> #return_type {
-                    self.0.borrow().invoke(#prop_name, &[#(#args_name.into(),)*])
-                        .try_into().unwrap_or_else(|_| panic!("Invalid return type for callback {}::{}", #component_name, #prop_name))
+                    #return_from_value(self.0.borrow().invoke(#prop_name, &[#(#args_to_value(#args_name),)*]))
+                        .unwrap_or_else(|_| panic!("Invalid return type for callback {}::{}", #component_name, #prop_name))
                 }
             ));
             let on_ident = accessor_names::rust_accessor_ident(name, AccessorKind::Handler);
@@ -121,7 +126,7 @@ fn generate_public_component(
                     let f = ::core::cell::RefCell::new(f);
                     self.0.borrow().set_callback(#prop_name, sp::Rc::new(move |values| {
                         let [#(#args_name,)*] = values else { panic!("invalid number of argument for callback {}::{}", #component_name, #prop_name) };
-                        (*f.borrow_mut())(#(#args_name.clone().try_into().unwrap_or_else(|_| panic!("invalid argument for callback {}::{}", #component_name, #prop_name)),)*).into()
+                        #return_to_value((*f.borrow_mut())(#(#args_from_value(#args_name.clone()).unwrap_or_else(|_| panic!("invalid argument for callback {}::{}", #component_name, #prop_name)),)*))
                     }))
                 }
             ));
@@ -131,11 +136,13 @@ fn generate_public_component(
             let return_type = rust_primitive_type(&function.return_type).unwrap();
             let args_name =
                 (0..function.args.len()).map(|i| format_ident!("arg_{}", i)).collect::<Vec<_>>();
+            let args_to_value = function.args.iter().map(convert_to_value_fn).collect::<Vec<_>>();
+            let return_from_value = convert_from_value_fn(&function.return_type);
             let caller_ident = accessor_names::rust_accessor_ident(name, AccessorKind::Invoker);
             property_and_callback_accessors.push(quote!(
                 pub fn #caller_ident(&self, #(#args_name : #callback_args,)*) -> #return_type {
-                    self.0.borrow().invoke(#prop_name, &[#(#args_name.into(),)*])
-                        .try_into().unwrap_or_else(|_| panic!("Invalid return type for function {}::{}", #component_name, #prop_name))
+                    #return_from_value(self.0.borrow().invoke(#prop_name, &[#(#args_to_value(#args_name),)*]))
+                        .unwrap_or_else(|_| panic!("Invalid return type for function {}::{}", #component_name, #prop_name))
                 }
             ));
         } else {
@@ -296,11 +303,16 @@ fn generate_global(
             let return_type = rust_primitive_type(&callback.return_type).unwrap();
             let args_name =
                 (0..callback.args.len()).map(|i| format_ident!("arg_{}", i)).collect::<Vec<_>>();
+            let args_to_value = callback.args.iter().map(convert_to_value_fn).collect::<Vec<_>>();
+            let args_from_value =
+                callback.args.iter().map(convert_from_value_fn).collect::<Vec<_>>();
+            let return_to_value = convert_to_value_fn(&callback.return_type);
+            let return_from_value = convert_from_value_fn(&callback.return_type);
             let caller_ident = accessor_names::rust_accessor_ident(name, AccessorKind::Invoker);
             property_and_callback_accessors.push(quote!(
                 pub fn #caller_ident(&self, #(#args_name : #callback_args,)*) -> #return_type {
-                    self.0.borrow().invoke_global(#global_name, #prop_name, &[#(#args_name.into(),)*])
-                        .try_into().unwrap_or_else(|_| panic!("Invalid return type for callback {}::{}", #global_name, #prop_name))
+                    #return_from_value(self.0.borrow().invoke_global(#global_name, #prop_name, &[#(#args_to_value(#args_name),)*]))
+                        .unwrap_or_else(|_| panic!("Invalid return type for callback {}::{}", #global_name, #prop_name))
                 }
             ));
             let on_ident = accessor_names::rust_accessor_ident(name, AccessorKind::Handler);
@@ -309,7 +321,7 @@ fn generate_global(
                     let f = ::core::cell::RefCell::new(f);
                     self.0.borrow().set_global_callback(#global_name, #prop_name, sp::Rc::new(move |values| {
                         let [#(#args_name,)*] = values else { panic!("invalid number of argument for callback {}::{}", #global_name, #prop_name) };
-                        (*f.borrow_mut())(#(#args_name.clone().try_into().unwrap_or_else(|_| panic!("invalid argument for callback {}::{}", #global_name, #prop_name)),)*).into()
+                        #return_to_value((*f.borrow_mut())(#(#args_from_value(#args_name.clone()).unwrap_or_else(|_| panic!("invalid argument for callback {}::{}", #global_name, #prop_name)),)*))
                     }))
                 }
             ));
@@ -319,11 +331,13 @@ fn generate_global(
             let return_type = rust_primitive_type(&function.return_type).unwrap();
             let args_name =
                 (0..function.args.len()).map(|i| format_ident!("arg_{}", i)).collect::<Vec<_>>();
+            let args_to_value = function.args.iter().map(convert_to_value_fn).collect::<Vec<_>>();
+            let return_from_value = convert_from_value_fn(&function.return_type);
             let caller_ident = accessor_names::rust_accessor_ident(name, AccessorKind::Invoker);
             property_and_callback_accessors.push(quote!(
                 pub fn #caller_ident(&self, #(#args_name : #callback_args,)*) -> #return_type {
-                    self.0.borrow().invoke_global(#global_name, #prop_name, &[#(#args_name.into(),)*])
-                        .try_into().unwrap_or_else(|_| panic!("Invalid return type for function {}::{}", #global_name, #prop_name))
+                    #return_from_value(self.0.borrow().invoke_global(#global_name, #prop_name, &[#(#args_to_value(#args_name),)*]))
+                        .unwrap_or_else(|_| panic!("Invalid return type for function {}::{}", #global_name, #prop_name))
                 }
             ));
         } else {
@@ -445,6 +459,16 @@ fn import_library_types(doc: &Document, llr: &llr::CompilationUnit) -> TokenStre
     }
 }
 
+/// Whether a value of `ty` doesn't convert to and from `Value` with `From` and `TryFrom`.
+fn needs_explicit_conversion(ty: &Type) -> bool {
+    match ty {
+        Type::Struct(s) => s.name.is_none(),
+        Type::Optional(_) => true,
+        Type::Array(a) => needs_explicit_conversion(a),
+        _ => false,
+    }
+}
+
 /// returns a function that converts the type to a Value.
 /// Normally, that would simply be `xxx.into()`, but for anonymous struct, we need an explicit conversion
 fn convert_to_value_fn(ty: &Type) -> TokenStream {
@@ -453,11 +477,21 @@ fn convert_to_value_fn(ty: &Type) -> TokenStream {
             // anonymous struct is mapped to a tuple
             let names = s.fields.keys().map(|k| k.as_str()).collect::<Vec<_>>();
             let fields = names.iter().map(|k| ident(k)).collect::<Vec<_>>();
+            let convert = s.fields.values().map(convert_to_value_fn);
             quote!((|(#(#fields,)*)| {
-                sp::live_preview::Value::Struct([#((#names.to_string(), sp::live_preview::Value::from(#fields)),)*].into_iter().collect())
+                sp::live_preview::Value::Struct([#((#names.to_string(), #convert(#fields)),)*].into_iter().collect())
             }))
         }
-        Type::Array(a) if matches!(a.as_ref(), Type::Struct(s) if s.name.is_none()) => {
+        Type::Optional(inner) => {
+            let inner_fn = convert_to_value_fn(inner);
+            quote!((|value: sp::Option<_>| -> sp::live_preview::Value {
+                match value {
+                    sp::Some(value) => #inner_fn(value),
+                    sp::None => sp::live_preview::Value::Null,
+                }
+            }))
+        }
+        Type::Array(a) if needs_explicit_conversion(a) => {
             let conf_fn = convert_to_value_fn(a.as_ref());
             quote!((|model: sp::ModelRc<_>| -> sp::live_preview::Value {
                 sp::live_preview::Value::Model(sp::ModelRc::new(model.map(#conf_fn)))
@@ -474,12 +508,22 @@ fn convert_from_value_fn(ty: &Type) -> TokenStream {
         Type::Struct(s) if s.name.is_none() => {
             let names = s.fields.keys().map(|k| k.as_str()).collect::<Vec<_>>();
             // anonymous struct is mapped to a tuple
+            let convert = s.fields.values().map(convert_from_value_fn);
             quote!((|v: sp::live_preview::Value| -> sp::Result<_, ()> {
                 let sp::live_preview::Value::Struct(s) = v else { return sp::Err(()) };
-                sp::Ok((#(s.get_field(#names).ok_or(())?.clone().try_into().map_err(|_|())?,)*))
+                sp::Ok((#(#convert(s.get_field(#names).ok_or(())?.clone()).map_err(|_|())?,)*))
             }))
         }
-        Type::Array(a) if matches!(a.as_ref(), Type::Struct(s) if s.name.is_none()) => {
+        Type::Optional(inner) => {
+            let inner_fn = convert_from_value_fn(inner);
+            quote!((|value: sp::live_preview::Value| -> sp::Result<_, ()> {
+                match value {
+                    sp::live_preview::Value::Null | sp::live_preview::Value::Void => sp::Ok(sp::None),
+                    value => #inner_fn(value).map(sp::Some).map_err(|_| ()),
+                }
+            }))
+        }
+        Type::Array(a) if needs_explicit_conversion(a) => {
             let conf_fn = convert_from_value_fn(a.as_ref());
             quote!((|v: sp::live_preview::Value| -> sp::Result<_, ()> {
                 let sp::live_preview::Value::Model(model) = v else { return sp::Err(()) };

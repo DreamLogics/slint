@@ -772,6 +772,12 @@ impl Expression {
                         // subset, so there is nothing to reject here.
                         return Self::from_unaryop_expression_node(node.into(), ctx);
                     }
+                    SyntaxKind::UnwrapExpression => {
+                        return Self::from_unwrap_expression_node(node.into(), ctx);
+                    }
+                    SyntaxKind::NullCoalesceExpression => {
+                        return Self::from_null_coalesce_expression_node(node.into(), ctx);
+                    }
                     SyntaxKind::ConditionalExpression => {
                         // A conditional is in the Slint SC subset; its condition,
                         // branches, and result type are each restricted on their own.
@@ -2196,6 +2202,11 @@ impl Expression {
                 if !matches!(op, '=' | '!') && ty.as_unit_product().is_none() && ty != Type::String
                 {
                     ctx.diag.push_error(format!("Values of type {ty} cannot be compared"), &node);
+                } else if ty == Type::Null {
+                    ctx.diag.push_error(
+                        "Compare 'null' with an optional value, such as an 'int?'".into(),
+                        &node,
+                    );
                 }
                 (Some(ty.clone()), Some(ty))
             }
@@ -2301,6 +2312,83 @@ impl Expression {
         };
 
         Expression::UnaryOp { sub: Box::new(exp), op }
+    }
+
+    fn from_unwrap_expression_node(
+        node: syntax_nodes::UnwrapExpression,
+        ctx: &mut LookupCtx,
+    ) -> Expression {
+        let base = Self::from_expression_node(node.Expression(), ctx);
+        if crate::reject_experimental_feature(
+            ctx.diag,
+            ctx.type_register,
+            crate::ExperimentalFeature::OptionalTypes,
+            "!",
+            &node,
+        ) {
+            return Expression::Invalid;
+        }
+        match base.ty() {
+            Type::Optional(_) => Expression::Unwrap { base: Box::new(base) },
+            Type::Invalid => Expression::Invalid,
+            ty => {
+                ctx.diag.push_error(
+                    format!(
+                        "'!' unwraps an optional value, but this value is '{ty}'. Remove the '!'"
+                    ),
+                    &node,
+                );
+                Expression::Invalid
+            }
+        }
+    }
+
+    fn from_null_coalesce_expression_node(
+        node: syntax_nodes::NullCoalesceExpression,
+        ctx: &mut LookupCtx,
+    ) -> Expression {
+        let (base_n, fallback_n) = node.Expression();
+        let base = Self::from_expression_node(base_n.clone(), ctx);
+        let base_ty = base.ty();
+        let fallback = ctx.with_expected_type(base_ty.clone(), |ctx| {
+            Self::from_expression_node(fallback_n.clone(), ctx)
+        });
+        if crate::reject_experimental_feature(
+            ctx.diag,
+            ctx.type_register,
+            crate::ExperimentalFeature::OptionalTypes,
+            "??",
+            &node,
+        ) {
+            return Expression::Invalid;
+        }
+        let inner = match &base_ty {
+            Type::Optional(inner) => (**inner).clone(),
+            Type::Invalid => return Expression::Invalid,
+            ty => {
+                ctx.diag.push_error(
+                    format!(
+                        "'??' needs an optional value on its left, but this value is '{ty}'. Remove the '??' and the fallback"
+                    ),
+                    &base_n,
+                );
+                return Expression::Invalid;
+            }
+        };
+        let target = match fallback.ty() {
+            Type::Optional(_) | Type::Null => base_ty,
+            _ => inner,
+        };
+        let fallback = fallback.maybe_convert_to(
+            target.clone(),
+            Some(&fallback_n.into()),
+            ctx.diag,
+            &ctx.symbol_counters,
+        );
+        if fallback.ty() != target {
+            return Expression::Invalid;
+        }
+        Expression::NullCoalesce { base: Box::new(base), fallback: Box::new(fallback) }
     }
 
     fn from_conditional_expression_node(
@@ -2643,6 +2731,22 @@ impl Expression {
                     }),
                     (Type::Color, Type::Brush) | (Type::Brush, Type::Color) => Type::Brush,
                     (Type::Float32, Type::Int32) | (Type::Int32, Type::Float32) => Type::Float32,
+                    (Type::Null, ty @ Type::Optional(_)) | (ty @ Type::Optional(_), Type::Null) => {
+                        ty
+                    }
+                    (Type::Null, ty) | (ty, Type::Null) if ty.is_valid_optional_inner() => {
+                        Type::Optional(ty.into())
+                    }
+                    (Type::Optional(a), b) | (b, Type::Optional(a)) => {
+                        let b = b.optional_inner().cloned().unwrap_or(b);
+                        let inner =
+                            Self::common_target_type_for_type_list([(*a).clone(), b].into_iter());
+                        if inner.is_valid_optional_inner() {
+                            Type::Optional(inner.into())
+                        } else {
+                            Type::Optional(a)
+                        }
+                    }
                     (target_type, expr_ty) => {
                         if expr_ty.can_convert(&target_type) {
                             target_type
@@ -2782,6 +2886,17 @@ fn lookup_qualified_name_node(
                 }
             }
 
+            if first_str == "null"
+                && crate::reject_experimental_feature(
+                    ctx.diag,
+                    ctx.type_register,
+                    crate::ExperimentalFeature::OptionalTypes,
+                    "null",
+                    &node,
+                )
+            {
+                return None;
+            }
             if it.next().is_some() {
                 ctx.diag.push_error(format!("Cannot access id '{}'", first.text()), &node);
             } else {

@@ -663,6 +663,34 @@ fn to_debug_string(
             expr.maybe_convert_to(Type::String, node, diag, symbol_counters)
         }
         Type::String => expr,
+        Type::Null => Expression::StringLiteral("null".into()),
+        Type::Optional(_) => {
+            let tmp = symbol_counters.generate_name("debug_opt_");
+            let read_tmp = || Expression::ReadLocalVariable { name: tmp.clone(), ty: ty.clone() };
+            let value = to_debug_string(
+                Expression::Unwrap { base: Box::new(read_tmp()) },
+                node,
+                diag,
+                symbol_counters,
+            );
+            if value.ty() != Type::String {
+                return Expression::Invalid;
+            }
+            Expression::CodeBlock(vec![
+                Expression::StoreLocalVariable { name: tmp.clone(), value: Box::new(expr) },
+                Expression::Condition {
+                    condition: Box::new(Expression::BinaryExpression {
+                        lhs: Box::new(read_tmp()),
+                        rhs: Box::new(Expression::default_value_for_type(&ty)),
+                        op: '=',
+                        source_location: None,
+                    }),
+                    true_expr: Box::new(Expression::StringLiteral("null".into())),
+                    false_expr: Box::new(value),
+                    source_location: None,
+                },
+            ])
+        }
         // TODO
         Type::Color
         | Type::Brush

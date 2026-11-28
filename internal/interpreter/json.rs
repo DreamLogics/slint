@@ -54,6 +54,13 @@ pub fn value_from_json(t: &langtype::Type, v: &serde_json::Value) -> Result<Valu
         i_slint_common::color_parsing::parse_color_literal(s).map(Color::from_argb_encoded)
     }
 
+    if let langtype::Type::Optional(inner) = t {
+        return match v {
+            serde_json::Value::Null => Ok(Value::Null),
+            v => value_from_json(inner, v),
+        };
+    }
+
     match v {
         serde_json::Value::Null => Ok(Value::Void),
         serde_json::Value::Bool(b) => Ok((*b).into()),
@@ -270,7 +277,7 @@ pub fn value_to_json(value: &Value) -> Result<serde_json::Value, String> {
     }
 
     match value {
-        Value::Void => Ok(serde_json::Value::Null),
+        Value::Void | Value::Null => Ok(serde_json::Value::Null),
         Value::Bool(b) => Ok((*b).into()),
         Value::Number(n) => {
             let r = if *n == n.round() {
@@ -334,6 +341,17 @@ fn test_from_json() {
     assert_eq!(v, Value::Void);
     let v = Value::from_json_str(&langtype::Type::Void, "null").unwrap();
     assert_eq!(v, Value::Void);
+
+    let optional_int = langtype::Type::Optional(langtype::Type::Int32.into());
+    let v = value_from_json_str(&optional_int, "null").unwrap();
+    assert_eq!(v, Value::Null);
+    assert_eq!(value_to_json(&v).unwrap(), serde_json::Value::Null);
+    let v = value_from_json_str(&optional_int, "42").unwrap();
+    assert_eq!(v, Value::Number(42.0));
+    let v =
+        value_from_json_str(&langtype::Type::Optional(langtype::Type::Color.into()), "\"#0ab0cd\"")
+            .unwrap();
+    assert_eq!(v, Value::Brush(Brush::SolidColor(Color::from_argb_u8(0xff, 0x0a, 0xb0, 0xcd))));
 
     let v = value_from_json_str(&langtype::Type::Float32, "42.0").unwrap();
     assert_eq!(v, Value::Number(42.0));
